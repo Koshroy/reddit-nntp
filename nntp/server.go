@@ -13,17 +13,18 @@ type Server struct {
 }
 
 type nntpCmd struct {
-	cmd string
+	cmd  string
 	args []string
 }
 
 type groupStatus uint
 type groupData struct {
-	name string
-	high int
-	low int
+	name   string
+	high   int
+	low    int
 	status groupStatus
 }
+
 const (
 	POSTING_PERMITTED = iota
 	POSTING_NONPERMITTED
@@ -71,7 +72,7 @@ func (s Server) Process() {
 		line, err := s.conn.ReadLine()
 		if err != nil {
 			if err != io.EOF {
-				log.Printf("error reading line from connection: %v\n", err)	
+				log.Printf("error reading line from connection: %v\n", err)
 			}
 			return
 		}
@@ -104,7 +105,7 @@ func (s Server) Process() {
 				return
 			}
 		}
-	}	
+	}
 }
 
 func parseLine(line string) (*nntpCmd, error) {
@@ -112,9 +113,9 @@ func parseLine(line string) (*nntpCmd, error) {
 	if len(splits) == 0 {
 		return nil, fmt.Errorf("unable to split line received on connection")
 	}
-	
+
 	return &nntpCmd{
-		cmd: splits[0],
+		cmd:  splits[0],
 		args: splits[1:],
 	}, nil
 }
@@ -159,9 +160,9 @@ func printList(conn *textproto.Conn, args []string) error {
 	}
 
 	grp := groupData{
-		name: "reddit.woodworking",
-		high: 0,
-		low: 1,
+		name:   "reddit.woodworking",
+		high:   0,
+		low:    1,
 		status: POSTING_NONPERMITTED,
 	}
 	return conn.PrintfLine("%s\n.", grp.String())
