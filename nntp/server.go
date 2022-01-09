@@ -31,7 +31,7 @@ const (
 	POSTING_MODERATED
 )
 
-func (g groupData) String() string {
+func (g groupData) String(groupMode bool) string {
 	status := "n"
 	switch g.status {
 	case POSTING_PERMITTED:
@@ -42,6 +42,9 @@ func (g groupData) String() string {
 		status = "m"
 	}
 
+	if groupMode {
+		return fmt.Sprintf("%s %d %d", g.name, g.low, g.high)
+	}
 	return fmt.Sprintf("%s %d %d %s", g.name, g.high, g.low, status)
 }
 
@@ -98,6 +101,10 @@ func (s Server) Process() {
 			if err := printList(s.conn, cmd.args); err != nil {
 				log.Printf("error sending list to client: %v\n", err)
 			}
+		case "GROUP":
+			if err := printGroup(s.conn, cmd.args); err != nil {
+				log.Printf("error sending group to client: %v\n", err)
+			}
 		default:
 			log.Printf("Unknown command found: %s\n", cmd.cmd)
 			if err := printUnknown(s.conn); err != nil {
@@ -122,10 +129,10 @@ func parseLine(line string) (*nntpCmd, error) {
 
 func printCapabilities(conn *textproto.Conn) error {
 	if err := conn.PrintfLine("101 Capability list:"); err != nil {
-		return err
+		return fmt.Errorf("could not print line: %w", err)
 	}
 	if err := conn.PrintfLine("READER"); err != nil {
-		return err
+		return fmt.Errorf("could not print line: %w", err)
 	}
 
 	return conn.PrintfLine("VERSION")
@@ -160,10 +167,20 @@ func printList(conn *textproto.Conn, args []string) error {
 	}
 
 	grp := groupData{
-		name:   "reddit.woodworking",
+		name:   "reddit.urbanplanning",
 		high:   0,
 		low:    1,
 		status: POSTING_NONPERMITTED,
 	}
-	return conn.PrintfLine("%s\n.", grp.String())
+	return conn.PrintfLine("%s\n.", grp.String(false))
+}
+
+func printGroup(conn *textproto.Conn, args []string) error {
+	grp := groupData{
+		name:   "reddit.urbanplanning",
+		high:   0,
+		low:    1,
+		status: POSTING_NONPERMITTED,
+	}
+	return conn.PrintfLine("%s\n.", grp.String(true))
 }
