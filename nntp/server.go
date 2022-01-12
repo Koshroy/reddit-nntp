@@ -119,6 +119,7 @@ func (s Server) processLoop(requests <-chan string) {
 			if err := printQuit(s.conn); err != nil {
 				log.Printf("error sending quit to client: %v\n", err)
 			}
+			return
 		case "LIST":
 			if err := printList(s.conn, cmd.args); err != nil {
 				log.Printf("error sending list to client: %v\n", err)
