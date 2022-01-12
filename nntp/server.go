@@ -6,10 +6,13 @@ import (
 	"log"
 	"net/textproto"
 	"strings"
+	"time"
 )
 
 type Server struct {
-	conn *textproto.Conn
+	conn          *textproto.Conn
+	subreddits    []string
+	startDateTime time.Time
 }
 
 type nntpCmd struct {
@@ -50,7 +53,9 @@ func (g groupData) String(groupMode bool) string {
 
 func NewServer(conn *textproto.Conn) Server {
 	return Server{
-		conn: conn,
+		conn:          conn,
+		subreddits:    []string{"VOIP", "urbanplanning"},
+		startDateTime: time.Now().AddDate(0, 0, -14),
 	}
 }
 
@@ -79,38 +84,43 @@ func (s Server) Process() {
 			}
 			return
 		}
-		log.Println("Received line:", line)
 
-		cmd, err := parseLine(line)
-		if err != nil {
-			log.Printf("error parsing line from client: %v\n", err)
+		go s.innerLoop(line)
+	}
+}
+
+func (s Server) innerLoop(line string) {
+	log.Println("Received line:", line)
+
+	cmd, err := parseLine(line)
+	if err != nil {
+		log.Printf("error parsing line from client: %v\n", err)
+		return
+	}
+
+	switch cmd.cmd {
+	case "CAPABILITIES":
+		if err := printCapabilities(s.conn); err != nil {
+			log.Printf("error sending capabilities to client: %v\n", err)
 			return
 		}
-
-		switch cmd.cmd {
-		case "CAPABILITIES":
-			if err := printCapabilities(s.conn); err != nil {
-				log.Printf("error sending capabilities to client: %v\n", err)
-				return
-			}
-		case "QUIT":
-			if err := printQuit(s.conn); err != nil {
-				log.Printf("error sending quit to client: %v\n", err)
-			}
-		case "LIST":
-			if err := printList(s.conn, cmd.args); err != nil {
-				log.Printf("error sending list to client: %v\n", err)
-			}
-		case "GROUP":
-			if err := printGroup(s.conn, cmd.args); err != nil {
-				log.Printf("error sending group to client: %v\n", err)
-			}
-		default:
-			log.Printf("Unknown command found: %s\n", cmd.cmd)
-			if err := printUnknown(s.conn); err != nil {
-				log.Printf("error printing unknown command: %v\n", err)
-				return
-			}
+	case "QUIT":
+		if err := printQuit(s.conn); err != nil {
+			log.Printf("error sending quit to client: %v\n", err)
+		}
+	case "LIST":
+		if err := printList(s.conn, cmd.args); err != nil {
+			log.Printf("error sending list to client: %v\n", err)
+		}
+	case "GROUP":
+		if err := printGroup(s.conn, cmd.args); err != nil {
+			log.Printf("error sending group to client: %v\n", err)
+		}
+	default:
+		log.Printf("Unknown command found: %s\n", cmd.cmd)
+		if err := printUnknown(s.conn); err != nil {
+			log.Printf("error printing unknown command: %v\n", err)
+			return
 		}
 	}
 }
