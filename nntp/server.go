@@ -135,7 +135,7 @@ func (s Server) processLoop(requests <-chan string) {
 				return
 			}
 		}
-		
+
 	}
 }
 

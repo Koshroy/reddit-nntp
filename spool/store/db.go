@@ -12,16 +12,16 @@ import (
 )
 
 type DB struct {
-	db  *sql.DB
+	db *sql.DB
 }
 
 type articleRecord struct {
-	postedAt time.Time
+	postedAt  time.Time
 	newsgroup string
-	subject string
-	author string
-	msgID string
-	body string
+	subject   string
+	author    string
+	msgID     string
+	body      string
 }
 
 func Open(dbPath string) (*DB, error) {
@@ -91,12 +91,12 @@ func (db *DB) AddPostAndComments(pc *reddit.PostAndComments) error {
 
 func postToArticle(p *reddit.Post) articleRecord {
 	return articleRecord{
-		postedAt: p.Created.Time,
+		postedAt:  p.Created.Time,
 		newsgroup: "reddit." + strings.ToLower(p.SubredditName),
-		subject: p.Title,
-		author: p.Author + " <" + p.Author + "@reddit" + ">",
-		msgID: "<" + p.ID + ".reddit.nntp>",
-		body: p.Body,
+		subject:   p.Title,
+		author:    p.Author + " <" + p.Author + "@reddit" + ">",
+		msgID:     "<" + p.ID + ".reddit.nntp>",
+		body:      p.Body,
 	}
 }
 

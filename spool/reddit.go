@@ -13,10 +13,10 @@ import (
 )
 
 type Spool struct {
-	db           *store.DB
-	client       *reddit.Client
-	startDate    *time.Time
-	timeFetched  bool
+	db          *store.DB
+	client      *reddit.Client
+	startDate   *time.Time
+	timeFetched bool
 }
 
 func New(fname string) (*Spool, error) {
@@ -33,9 +33,9 @@ func New(fname string) (*Spool, error) {
 
 	now := time.Now()
 	return &Spool{
-		db: db,
-		client: client,
-		startDate: &now,
+		db:          db,
+		client:      client,
+		startDate:   &now,
 		timeFetched: false,
 	}, nil
 }
