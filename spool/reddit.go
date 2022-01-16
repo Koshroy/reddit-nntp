@@ -161,3 +161,11 @@ func (s *Spool) Newsgroups() ([]string, error) {
 
 	return groups, nil
 }
+
+func (s *Spool) GroupArticleCount(group string) (int, error) {
+	count, err := s.db.GroupArticleCount(group)
+	if err != nil {
+		return 0, fmt.Errorf("error getting article count for group %s: %w", group, err)
+	}
+	return count, nil
+}

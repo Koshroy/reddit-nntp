@@ -63,7 +63,7 @@ func acceptorLoop(l net.Listener, spool *spool.Spool) {
 		}
 		log.Println("Client connected")
 		nc := textproto.NewConn(c)
-		s := nntp.NewServer(nc)
+		s := nntp.NewServer(nc, spool)
 		go s.Process()
 	}
 }

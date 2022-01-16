@@ -178,3 +178,27 @@ func (db *DB) FetchNewsgroups() ([]string, error) {
 
 	return groups, nil
 }
+
+func (db *DB) GroupArticleCount(group string) (int, error) {
+	stmt, err := db.db.Prepare("SELECT COUNT(*) FROM spool WHERE newsgroup = ?")
+	if err != nil {
+		return 0, fmt.Errorf("error preparing article count query for group %s: %w", group, err)
+	}
+	defer stmt.Close()
+	rows, err := stmt.Query(group)
+	if err != nil {
+		return 0, fmt.Errorf("error querying for article count for group %s: %w", group, err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var count int
+		err = rows.Scan(&count)
+		if err != nil {
+			return count, fmt.Errorf("could not unmarshal db row: %w", err)
+		}
+		return count, nil
+	}
+
+	return 0, nil
+}

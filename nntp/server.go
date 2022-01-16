@@ -6,13 +6,13 @@ import (
 	"log"
 	"net/textproto"
 	"strings"
-	"time"
+
+	"github.com/Koshroy/reddit-nntp/spool"
 )
 
 type Server struct {
-	conn          *textproto.Conn
-	subreddits    []string
-	startDateTime time.Time
+	conn  *textproto.Conn
+	spool *spool.Spool
 }
 
 type nntpCmd struct {
@@ -51,11 +51,10 @@ func (g groupData) String(groupMode bool) string {
 	return fmt.Sprintf("%s %d %d %s", g.name, g.high, g.low, status)
 }
 
-func NewServer(conn *textproto.Conn) Server {
+func NewServer(conn *textproto.Conn, spool *spool.Spool) Server {
 	return Server{
-		conn:          conn,
-		subreddits:    []string{"VOIP", "urbanplanning"},
-		startDateTime: time.Now().AddDate(0, 0, -14),
+		conn:  conn,
+		spool: spool,
 	}
 }
 
@@ -121,11 +120,11 @@ func (s Server) processLoop(requests <-chan string) {
 			}
 			return
 		case "LIST":
-			if err := printList(s.conn, cmd.args); err != nil {
+			if err := printList(s.conn, s.spool, cmd.args); err != nil {
 				log.Printf("error sending list to client: %v\n", err)
 			}
 		case "GROUP":
-			if err := printGroup(s.conn, cmd.args); err != nil {
+			if err := printGroup(s.conn, s.spool, cmd.args); err != nil {
 				log.Printf("error sending group to client: %v\n", err)
 			}
 		default:
@@ -170,7 +169,37 @@ func printUnknown(conn *textproto.Conn) error {
 	return conn.PrintfLine("500 Unknown command")
 }
 
-func printList(conn *textproto.Conn, args []string) error {
+func getGroupData(spool *spool.Spool, groups []string) ([]groupData, error) {
+	var datum []groupData
+	for _, group := range groups {
+		count, err := spool.GroupArticleCount(group)
+		if err != nil {
+			return nil, err
+		}
+
+		var grpData groupData
+		if count == 0 {
+			grpData = groupData{
+				name:   group,
+				high:   1,
+				low:    0,
+				status: POSTING_NONPERMITTED,
+			}
+		} else {
+			grpData = groupData{
+				name:   group,
+				high:   count,
+				low:    1,
+				status: POSTING_NONPERMITTED,
+			}
+		}
+		datum = append(datum, grpData)
+	}
+
+	return datum, nil
+}
+
+func printList(conn *textproto.Conn, spool *spool.Spool, args []string) error {
 	active := false
 	if len(args) == 0 {
 		active = true
@@ -185,26 +214,56 @@ func printList(conn *textproto.Conn, args []string) error {
 		return printUnknown(conn)
 	}
 
-	err := conn.PrintfLine("215 list of newsgroups follows")
+	groups, err := spool.Newsgroups()
+	datum, err := getGroupData(spool, groups)
+	if err != nil {
+		err2 := conn.PrintfLine("403 error reading from spool")
+		if err2 != nil {
+			log.Println("could not write error response to connection:", err2)
+		}
+		return err
+	}
+
+	err = conn.PrintfLine("215 list of newsgroups follows")
 	if err != nil {
 		return fmt.Errorf("error returning active list status line: %w", err)
 	}
 
-	grp := groupData{
-		name:   "reddit.urbanplanning",
-		high:   0,
-		low:    1,
-		status: POSTING_NONPERMITTED,
+	for _, data := range datum {
+		err := conn.PrintfLine("%s\n.", data.String(false))
+		if err != nil {
+			return fmt.Errorf("error writing group response line to socket: %w", err)
+		}
 	}
-	return conn.PrintfLine("%s\n.", grp.String(false))
+
+	return nil
 }
 
-func printGroup(conn *textproto.Conn, args []string) error {
-	grp := groupData{
-		name:   "reddit.urbanplanning",
-		high:   0,
-		low:    1,
-		status: POSTING_NONPERMITTED,
+func printGroup(conn *textproto.Conn, spool *spool.Spool, args []string) error {
+	groups, err := spool.Newsgroups()
+	if err != nil {
+		err2 := conn.PrintfLine("403 error reading from spool")
+		if err2 != nil {
+			log.Println("could not write error response to connection:", err2)
+		}
+		return err
 	}
-	return conn.PrintfLine("%s\n.", grp.String(true))
+
+	datum, err := getGroupData(spool, groups)
+	if err != nil {
+		err2 := conn.PrintfLine("403 error reading from spool")
+		if err2 != nil {
+			log.Println("could not write error response to connection:", err2)
+		}
+		return err
+	}
+
+	for _, data := range datum {
+		err := conn.PrintfLine("%s\n.", data.String(true))
+		if err != nil {
+			return fmt.Errorf("error writing group response line to socket: %w", err)
+		}
+	}
+
+	return nil
 }
