@@ -2,7 +2,10 @@ module github.com/Koshroy/reddit-nntp
 
 go 1.17
 
-require github.com/vartanbeno/go-reddit/v2 v2.0.1
+require (
+	github.com/mattn/go-sqlite3 v1.14.10
+	github.com/vartanbeno/go-reddit/v2 v2.0.1
+)
 
 require (
 	github.com/golang/protobuf v1.2.0 // indirect

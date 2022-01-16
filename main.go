@@ -1,16 +1,33 @@
 package main
 
 import (
-	"context"
+	"flag"
 	"log"
 	"net"
 	"net/textproto"
+	"time"
 
 	"github.com/Koshroy/reddit-nntp/nntp"
-	"github.com/vartanbeno/go-reddit/v2/reddit"
+	"github.com/Koshroy/reddit-nntp/spool"
 )
 
 func main() {
+	initFlag := flag.Bool("init", false, "initialize the database")
+	flag.Parse()
+
+	spool, err := spool.New("/tmp/spool.db")
+	if err != nil {
+		log.Fatalln("Could not open spool:", err)
+	}
+	if *initFlag {
+		err = spool.Init(time.Now().Add(-24 * 7 * time.Hour))
+		if err != nil {
+			log.Fatalln("Could not initialize spool:", err)
+		}
+		log.Println("Initialized database")
+		return
+	}
+
 	readerListener, err := net.Listen("tcp", "0.0.0.0:1119")
 	if err != nil {
 		log.Fatalln("Could not open reader listener")
@@ -21,26 +38,6 @@ func main() {
 
 	//go acceptorLoop(transitListener, TRANSIT_LISTENER)
 	acceptorLoop(readerListener)
-
-	client, err := reddit.NewReadonlyClient()
-	if err != nil {
-		log.Fatalln("Could not initialize reddit client")
-	}
-
-	posts, _, err := client.Subreddit.TopPosts(context.Background(), "golang", &reddit.ListPostOptions{
-		ListOptions: reddit.ListOptions{
-			Limit: 5,
-		},
-		Time: "all",
-	})
-	if err != nil {
-		log.Fatalln("Received error when getting sub", err)
-	}
-
-	log.Printf("Received %d posts.\n", len(posts))
-	for _, p := range posts {
-		log.Printf("[%d] - %s\n", p.Score, p.Title)
-	}
 }
 
 func acceptorLoop(l net.Listener) {
