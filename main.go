@@ -13,6 +13,7 @@ import (
 
 func main() {
 	initFlag := flag.Bool("init", false, "initialize the database")
+	subs := flag.Bool("subs", false, "get subreddits")
 	flag.Parse()
 
 	spool, err := spool.New("/tmp/spool.db")
@@ -28,6 +29,20 @@ func main() {
 		return
 	}
 
+	if *subs {
+		log.Println("Populating spool with subs")
+		startDate, err := spool.StartDate()
+		if err != nil {
+			log.Fatalln("Could not fetch start date:", err)
+		}
+		err = spool.FetchSubreddit("VOIP", *startDate)
+		if err != nil {
+			log.Fatalln("Could not fetch sub:", err)
+		}
+		log.Println("Populated spool with sub")
+		return
+	}
+
 	readerListener, err := net.Listen("tcp", "0.0.0.0:1119")
 	if err != nil {
 		log.Fatalln("Could not open reader listener")
@@ -37,10 +52,10 @@ func main() {
 	log.Println("Listening on :1119")
 
 	//go acceptorLoop(transitListener, TRANSIT_LISTENER)
-	acceptorLoop(readerListener)
+	acceptorLoop(readerListener, spool)
 }
 
-func acceptorLoop(l net.Listener) {
+func acceptorLoop(l net.Listener, spool *spool.Spool) {
 	for {
 		c, err := l.Accept()
 		if err != nil {

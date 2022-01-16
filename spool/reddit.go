@@ -2,6 +2,7 @@ package spool
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -14,6 +15,8 @@ import (
 type Spool struct {
 	db           *store.DB
 	client       *reddit.Client
+	startDate    *time.Time
+	timeFetched  bool
 }
 
 func New(fname string) (*Spool, error) {
@@ -28,9 +31,12 @@ func New(fname string) (*Spool, error) {
 		return nil, fmt.Errorf("could not open Reddit client: %w", err)
 	}
 
+	now := time.Now()
 	return &Spool{
 		db: db,
 		client: client,
+		startDate: &now,
+		timeFetched: false,
 	}, nil
 }
 
@@ -52,6 +58,21 @@ func (s *Spool) Init(startDate time.Time) error {
 		return fmt.Errorf("Error initializing spool: %w", err)
 	}
 	return nil
+}
+
+func (s *Spool) StartDate() (*time.Time, error) {
+	if s.timeFetched {
+		return s.startDate, nil
+	}
+
+	t, err := s.db.GetStartDate()
+	if err != nil {
+		return nil, fmt.Errorf("error fetching start date: %w", err)
+	}
+	s.startDate = t
+	s.timeFetched = true
+
+	return t, nil
 }
 
 func (s *Spool) FetchSubreddit(subreddit string, startDateTime time.Time) error {
@@ -105,13 +126,23 @@ func (s *Spool) FetchSubreddit(subreddit string, startDateTime time.Time) error 
 					log.Printf("Error fetching more comments: %s\n", err)
 					break
 				}
+			} else {
+				break
 			}
 		}
 
 		postComments = append(postComments, pc)
 	}
 
+	if len(postComments) == 0 {
+		return errors.New("could not fetch any posts")
+	}
+
 	for _, pc := range postComments {
+		if pc == nil {
+			log.Println("Skipping empty postcomment")
+			continue
+		}
 		err := s.db.AddPostAndComments(pc)
 		if err != nil {
 			log.Printf("error adding postcomments to spool: %v\n", err)
@@ -119,4 +150,14 @@ func (s *Spool) FetchSubreddit(subreddit string, startDateTime time.Time) error 
 	}
 
 	return nil
+}
+
+func (s *Spool) Newsgroups() ([]string, error) {
+	var empty []string
+	groups, err := s.db.FetchNewsgroups()
+	if err != nil {
+		return empty, fmt.Errorf("error getting newsgroups in spool: %w", err)
+	}
+
+	return groups, nil
 }
