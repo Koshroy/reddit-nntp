@@ -147,13 +147,13 @@ func processLoop(conn *textproto.Conn, spool *spool.Spool, requests <-chan strin
 }
 
 func parseLine(line string) (*nntpCmd, error) {
-	splits := strings.SplitN(strings.ToUpper(line), " ", 2)
+	splits := strings.SplitN(line, " ", 2)
 	if len(splits) == 0 {
 		return nil, fmt.Errorf("unable to split line received on connection")
 	}
 
 	return &nntpCmd{
-		cmd:  splits[0],
+		cmd:  strings.ToUpper(splits[0]),
 		args: splits[1:],
 	}, nil
 }
@@ -265,7 +265,7 @@ func printGroup(conn *textproto.Conn, spool *spool.Spool, args []string) error {
 		return conn.PrintfLine("500 No group name provided")
 	}
 
-	group := strings.ToLower(args[0])
+	group := args[0]
 	count, err := spool.GroupArticleCount(group)
 	if err != nil {
 		log.Println("error getting group", group, "article count:", err)
@@ -289,4 +289,14 @@ func printGroup(conn *textproto.Conn, spool *spool.Spool, args []string) error {
 	}
 
 	return conn.PrintfLine("211 %s", grpData.String(true))
+}
+
+func printHead(conn *textproto.Conn, spool *spool.Spool, args []string) error {
+	if len(args) < 1 {
+		// TODO: no arg is unsupported
+		return conn.PrintfLine("500 current article mode unsupported")
+	}
+
+	// arg := args[0]
+	return nil
 }
