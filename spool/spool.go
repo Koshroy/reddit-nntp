@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/vartanbeno/go-reddit/v2/reddit"
@@ -75,6 +76,26 @@ func (s *Spool) StartDate() (*time.Time, error) {
 	return t, nil
 }
 
+func (s *Spool) addPostAndComments(pc *reddit.PostAndComments) error {
+	a := postToArticle(pc.Post)
+	err := s.db.InsertArticleRecord(&a)
+	if err != nil {
+		return fmt.Errorf("error adding reddit post to spool: %w", err)
+	}
+	return nil
+}
+
+func postToArticle(p *reddit.Post) store.ArticleRecord {
+	return store.ArticleRecord{
+		PostedAt:  p.Created.Time,
+		Newsgroup: "reddit." + strings.ToLower(p.SubredditName),
+		Subject:   p.Title,
+		Author:    p.Author + " <" + p.Author + "@reddit" + ">",
+		MsgID:     "<" + p.ID + ".reddit.nntp>",
+		Body:      p.Body,
+	}
+}
+
 func (s *Spool) FetchSubreddit(subreddit string, startDateTime time.Time) error {
 	allPosts := make([]*reddit.Post, 0)
 	results := false
@@ -143,7 +164,7 @@ func (s *Spool) FetchSubreddit(subreddit string, startDateTime time.Time) error 
 			log.Println("Skipping empty postcomment")
 			continue
 		}
-		err := s.db.AddPostAndComments(pc)
+		err := s.addPostAndComments(pc)
 		if err != nil {
 			log.Printf("error adding postcomments to spool: %v\n", err)
 		}

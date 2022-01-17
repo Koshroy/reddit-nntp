@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net/textproto"
+	"strconv"
 	"strings"
 
 	"github.com/Koshroy/reddit-nntp/spool"
@@ -297,6 +298,21 @@ func printHead(conn *textproto.Conn, spool *spool.Spool, args []string) error {
 		return conn.PrintfLine("500 current article mode unsupported")
 	}
 
-	// arg := args[0]
+	arg := args[0]
+	if len(arg) == 0 {
+		log.Println("error: received empty argument that should have been parsed out")
+		return conn.PrintfLine("500 could not parse line properly")
+	}
+
+	if arg[0] == '<' && arg[len(arg)-1] == '>' {
+		// Message-ID mode
+		return conn.PrintfLine("500 message-id mode unsupported")
+	} else {
+		_, err := strconv.Atoi(arg)
+		if err != nil {
+			return conn.PrintfLine("500 could not parse argument properly")
+		}
+	}
+
 	return nil
 }

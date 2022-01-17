@@ -4,24 +4,30 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/vartanbeno/go-reddit/v2/reddit"
 )
 
 type DB struct {
 	db *sql.DB
 }
 
-type articleRecord struct {
-	postedAt  time.Time
-	newsgroup string
-	subject   string
-	author    string
-	msgID     string
-	body      string
+type ArticleRecord struct {
+	PostedAt  time.Time
+	Newsgroup string
+	Subject   string
+	Author    string
+	MsgID     string
+	Body      string
+}
+
+type Header struct {
+	PostedAt  string
+	Newsgroup string
+	Subject   string
+	Author    string
+	MsgID     string
 }
 
 func Open(dbPath string) (*DB, error) {
@@ -80,40 +86,19 @@ func (db *DB) Close() error {
 	return nil
 }
 
-func (db *DB) AddPostAndComments(pc *reddit.PostAndComments) error {
-	a := postToArticle(pc.Post)
-	err := db.insertArticleRecord(&a)
-	if err != nil {
-		return fmt.Errorf("error adding reddit post to spool: %w", err)
-	}
-	return nil
-}
-
-func postToArticle(p *reddit.Post) articleRecord {
-	return articleRecord{
-		postedAt:  p.Created.Time,
-		newsgroup: "reddit." + strings.ToLower(p.SubredditName),
-		subject:   p.Title,
-		author:    p.Author + " <" + p.Author + "@reddit" + ">",
-		msgID:     "<" + p.ID + ".reddit.nntp>",
-		body:      p.Body,
-	}
-}
-
-func (db *DB) insertArticleRecord(ar *articleRecord) error {
+func (db *DB) InsertArticleRecord(ar *ArticleRecord) error {
 	insertStmt := `
         INSERT INTO spool(posted_at, newsgroup, subject, author, message_id, body)
         VALUES (?, ?, ?, ?, ?, ?)
         `
-
 	_, err := db.db.Exec(
 		insertStmt,
-		ar.postedAt,
-		ar.newsgroup,
-		ar.subject,
-		ar.author,
-		ar.msgID,
-		ar.body,
+		ar.PostedAt,
+		ar.Newsgroup,
+		ar.Subject,
+		ar.Author,
+		ar.MsgID,
+		ar.Body,
 	)
 
 	if err != nil {
@@ -201,4 +186,45 @@ func (db *DB) GroupArticleCount(group string) (int, error) {
 	}
 
 	return 0, nil
+}
+
+func (db *DB) GetHeaders(group string, count int) ([]Header, error) {
+	headers := make([]Header, count)
+	raw := `
+        SELECT posted_at, subject, author, message_id
+        FROM spool WHERE newsgroup = ?;
+        `
+	stmt, err := db.db.Prepare(raw)
+	if err != nil {
+		return headers, fmt.Errorf("error preparing header query for group %s: %w", group, err)
+	}
+	defer stmt.Close()
+	rows, err := stmt.Query(group)
+	if err != nil {
+		return headers, fmt.Errorf("error querying for headers for group %s: %w", group, err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var postedAt string
+		var subject string
+		var author string
+		var messageID string
+
+		err = rows.Scan(&postedAt, &subject, &author, &messageID)
+		if err != nil {
+			return headers, fmt.Errorf("could not unmarshal db row: %w", err)
+		}
+
+		header := Header{
+			PostedAt:  postedAt,
+			Newsgroup: group,
+			Subject:   subject,
+			Author:    author,
+			MsgID:     messageID,
+		}
+		headers = append(headers, header)
+	}
+
+	return headers, nil
 }
