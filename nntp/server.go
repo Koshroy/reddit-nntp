@@ -11,8 +11,9 @@ import (
 )
 
 type Server struct {
-	conn  *textproto.Conn
-	spool *spool.Spool
+	conn     *textproto.Conn
+	spool    *spool.Spool
+	curGroup string
 }
 
 type nntpCmd struct {
@@ -27,6 +28,8 @@ type groupData struct {
 	low    int
 	status groupStatus
 }
+
+const POST_LINE = "201 Posting prohibited"
 
 const (
 	POSTING_PERMITTED = iota
@@ -46,7 +49,8 @@ func (g groupData) String(groupMode bool) string {
 	}
 
 	if groupMode {
-		return fmt.Sprintf("%s %d %d", g.name, g.low, g.high)
+		est := g.high - g.low
+		return fmt.Sprintf("%d %d %d %s", est, g.low, g.high, g.name)
 	}
 	return fmt.Sprintf("%s %d %d %s", g.name, g.high, g.low, status)
 }
@@ -69,7 +73,7 @@ func (s Server) Close() {
 func (s Server) Process() {
 	defer s.Close()
 
-	err := s.conn.PrintfLine("201 Hello!")
+	err := s.conn.PrintfLine(POST_LINE)
 	if err != nil {
 		log.Printf("error writing to connection: %v\n", err)
 		return
@@ -80,7 +84,7 @@ func (s Server) Process() {
 		close(requests)
 	}()
 
-	go s.processLoop(requests)
+	go processLoop(s.conn, s.spool, requests)
 	for {
 		line, err := s.conn.ReadLine()
 		if err != nil {
@@ -94,7 +98,7 @@ func (s Server) Process() {
 	}
 }
 
-func (s Server) processLoop(requests <-chan string) {
+func processLoop(conn *textproto.Conn, spool *spool.Spool, requests <-chan string) {
 	for {
 		line, ok := <-requests
 		if !ok {
@@ -110,26 +114,30 @@ func (s Server) processLoop(requests <-chan string) {
 
 		switch cmd.cmd {
 		case "CAPABILITIES":
-			if err := printCapabilities(s.conn); err != nil {
+			if err := printCapabilities(conn); err != nil {
 				log.Printf("error sending capabilities to client: %v\n", err)
 				return
 			}
 		case "QUIT":
-			if err := printQuit(s.conn); err != nil {
+			if err := printQuit(conn); err != nil {
 				log.Printf("error sending quit to client: %v\n", err)
 			}
 			return
 		case "LIST":
-			if err := printList(s.conn, s.spool, cmd.args); err != nil {
+			if err := printList(conn, spool, cmd.args); err != nil {
 				log.Printf("error sending list to client: %v\n", err)
 			}
 		case "GROUP":
-			if err := printGroup(s.conn, s.spool, cmd.args); err != nil {
+			if err := printGroup(conn, spool, cmd.args); err != nil {
+				log.Printf("error sending group to client: %v\n", err)
+			}
+		case "MODE":
+			if err := printMode(conn, cmd.args); err != nil {
 				log.Printf("error sending group to client: %v\n", err)
 			}
 		default:
 			log.Printf("Unknown command found: %s\n", cmd.cmd)
-			if err := printUnknown(s.conn); err != nil {
+			if err := printUnknown(conn); err != nil {
 				log.Printf("error printing unknown command: %v\n", err)
 				return
 			}
@@ -163,6 +171,19 @@ func printCapabilities(conn *textproto.Conn) error {
 
 func printQuit(conn *textproto.Conn) error {
 	return conn.PrintfLine("205 Connection closing")
+}
+
+func printMode(conn *textproto.Conn, args []string) error {
+	if len(args) < 1 {
+		// TODO: should we do this here?
+		return printUnknown(conn)
+	}
+	if args[0] == "READER" {
+		return conn.PrintfLine(POST_LINE)
+	} else {
+		return conn.PrintfLine("500 Only READER is supported")
+	}
+
 }
 
 func printUnknown(conn *textproto.Conn) error {
@@ -240,30 +261,32 @@ func printList(conn *textproto.Conn, spool *spool.Spool, args []string) error {
 }
 
 func printGroup(conn *textproto.Conn, spool *spool.Spool, args []string) error {
-	groups, err := spool.Newsgroups()
+	if len(args) < 1 {
+		return conn.PrintfLine("500 No group name provided")
+	}
+
+	group := strings.ToLower(args[0])
+	count, err := spool.GroupArticleCount(group)
 	if err != nil {
-		err2 := conn.PrintfLine("403 error reading from spool")
-		if err2 != nil {
-			log.Println("could not write error response to connection:", err2)
-		}
-		return err
+		log.Println("error getting group", group, "article count:", err)
+		return conn.PrintfLine("403 error reading from spool")
 	}
-
-	datum, err := getGroupData(spool, groups)
-	if err != nil {
-		err2 := conn.PrintfLine("403 error reading from spool")
-		if err2 != nil {
-			log.Println("could not write error response to connection:", err2)
+	var grpData groupData
+	if count == 0 {
+		grpData = groupData{
+			name:   group,
+			high:   1,
+			low:    0,
+			status: POSTING_NONPERMITTED,
 		}
-		return err
-	}
-
-	for _, data := range datum {
-		err := conn.PrintfLine("%s\n.", data.String(true))
-		if err != nil {
-			return fmt.Errorf("error writing group response line to socket: %w", err)
+	} else {
+		grpData = groupData{
+			name:   group,
+			high:   count,
+			low:    1,
+			status: POSTING_NONPERMITTED,
 		}
 	}
 
-	return nil
+	return conn.PrintfLine("211 %s", grpData.String(true))
 }
