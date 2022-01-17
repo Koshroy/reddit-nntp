@@ -239,11 +239,7 @@ func printList(conn *textproto.Conn, spool *spool.Spool, args []string) error {
 	groups, err := spool.Newsgroups()
 	datum, err := getGroupData(spool, groups)
 	if err != nil {
-		err2 := conn.PrintfLine("403 error reading from spool")
-		if err2 != nil {
-			log.Println("could not write error response to connection:", err2)
-		}
-		return err
+		return conn.PrintfLine("403 error reading from spool")
 	}
 
 	err = conn.PrintfLine("215 list of newsgroups follows")
