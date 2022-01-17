@@ -188,18 +188,22 @@ func (db *DB) GroupArticleCount(group string) (int, error) {
 	return 0, nil
 }
 
-func (db *DB) GetHeaders(group string, count int) ([]Header, error) {
+func (db *DB) GetHeaders(group string, count uint) ([]Header, error) {
+	if count == 0 {
+		return nil, errors.New("error: cannot request 0 headers")
+	}
+
 	headers := make([]Header, count)
 	raw := `
         SELECT posted_at, subject, author, message_id
-        FROM spool WHERE newsgroup = ?;
+        FROM spool WHERE newsgroup = ? LIMIT ?;
         `
 	stmt, err := db.db.Prepare(raw)
 	if err != nil {
 		return headers, fmt.Errorf("error preparing header query for group %s: %w", group, err)
 	}
 	defer stmt.Close()
-	rows, err := stmt.Query(group)
+	rows, err := stmt.Query(group, count)
 	if err != nil {
 		return headers, fmt.Errorf("error querying for headers for group %s: %w", group, err)
 	}
