@@ -52,6 +52,22 @@ func (h Header) Bytes() bytes.Buffer {
 	return buf
 }
 
+type Article struct {
+	Header Header
+	Body   []byte
+}
+
+func (a Article) Bytes() bytes.Buffer {
+	var buf bytes.Buffer
+
+	hdrBytes := a.Header.Bytes()
+	buf.ReadFrom(&hdrBytes)
+	buf.WriteRune('\n')
+	buf.Write(a.Body)
+
+	return buf
+}
+
 func New(fname string) (*Spool, error) {
 	db, err := store.Open(fname)
 	if err != nil {
@@ -243,4 +259,33 @@ func (s *Spool) GetHeaderByNGNum(group string, articleNum uint) (*Header, error)
 		MsgID:     dbHeader.MsgID,
 	}
 	return header, nil
+}
+
+func (s *Spool) GetArticleByNGNum(group string, articleNum uint) (*Article, error) {
+	rowIDs, err := s.db.GetRowIDs(group, articleNum)
+	if err != nil {
+		return nil, fmt.Errorf("error getting row ID for header request: %w", err)
+	}
+
+	if len(rowIDs) == 0 {
+		return nil, fmt.Errorf("no headers found for group %s", group)
+	}
+
+	last := rowIDs[len(rowIDs)-1]
+	dbArticle, err := s.db.GetArticleByRowID(last)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching headers for row ID %d: %w", last, err)
+	}
+
+	article := &Article{
+		Header: Header{
+			PostedAt:  dbArticle.Header.PostedAt,
+			Newsgroup: dbArticle.Header.Newsgroup,
+			Subject:   dbArticle.Header.Subject,
+			Author:    dbArticle.Header.Author,
+			MsgID:     dbArticle.Header.MsgID,
+		},
+		Body: dbArticle.Body,
+	}
+	return article, nil
 }

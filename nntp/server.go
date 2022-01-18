@@ -166,6 +166,10 @@ func processLoop(ctx context.Context, conn *textproto.Conn, spool *spool.Spool, 
 				if err := printHead(conn, spool, cmd.args); err != nil {
 					log.Printf("error sending group to client: %v\n", err)
 				}
+			case "ARTICLE":
+				if err := printArticle(conn, spool, cmd.args); err != nil {
+					log.Printf("error sending group to client: %v\n", err)
+				}
 			case "MODE":
 				if err := printMode(conn, cmd.args); err != nil {
 					log.Printf("error sending group to client: %v\n", err)
@@ -359,6 +363,49 @@ func printHead(conn *textproto.Conn, spool *spool.Spool, args []string) error {
 		_, err = buf.WriteTo(w)
 		if err != nil {
 			return fmt.Errorf("error writing header response: %w", err)
+		}
+
+		return w.Close()
+	}
+
+	return nil
+}
+
+func printArticle(conn *textproto.Conn, spool *spool.Spool, args []string) error {
+	if len(args) < 1 {
+		// TODO: no arg is unsupported
+		return conn.PrintfLine("500 current article mode unsupported")
+	}
+
+	arg := args[0]
+	if len(arg) == 0 {
+		log.Println("error: received empty argument that should have been parsed out")
+		return conn.PrintfLine("500 could not parse line properly")
+	}
+
+	if arg[0] == '<' && arg[len(arg)-1] == '>' {
+		// Message-ID mode
+		return conn.PrintfLine("500 message-id mode unsupported")
+	} else {
+		articleNum, err := strconv.Atoi(arg)
+		if err != nil {
+			return conn.PrintfLine("500 could not parse argument properly")
+		}
+
+		article, err := spool.GetArticleByNGNum("reddit.voip", uint(articleNum))
+		if err != nil {
+			return conn.PrintfLine("423 No article with that number")
+		}
+
+		w := conn.DotWriter()
+		buf := article.Bytes()
+		_, err = w.Write([]byte(fmt.Sprintf("220 %d %s\n", articleNum, article.Header.MsgID)))
+		if err != nil {
+			return fmt.Errorf("error writing header response header: %w", err)
+		}
+		_, err = buf.WriteTo(w)
+		if err != nil {
+			return fmt.Errorf("error writing article response: %w", err)
 		}
 
 		return w.Close()

@@ -32,6 +32,11 @@ type Header struct {
 	MsgID     string
 }
 
+type Article struct {
+	Header Header
+	Body   []byte
+}
+
 func Open(dbPath string) (*DB, error) {
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
@@ -257,6 +262,50 @@ func (db *DB) GetHeaderByRowID(rowID RowID) (*Header, error) {
 			Subject:   subject,
 			Author:    author,
 			MsgID:     msgID,
+		}, nil
+	}
+
+	return nil, nil
+}
+
+func (db *DB) GetArticleByRowID(rowID RowID) (*Article, error) {
+	raw := `
+        SELECT posted_at, newsgroup, subject, author, message_id, body
+        FROM spool WHERE rowid = ?;
+        `
+	stmt, err := db.db.Prepare(raw)
+	if err != nil {
+		return nil, fmt.Errorf("error preparing article rowid %d query: %w", rowID, err)
+	}
+	defer stmt.Close()
+	rows, err := stmt.Query(rowID)
+	if err != nil {
+		return nil, fmt.Errorf("error querying for article by rowID %d: %w", rowID, err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var postedAt string
+		var newsgroup string
+		var subject string
+		var author string
+		var msgID string
+		var body []byte
+
+		err = rows.Scan(&postedAt, &newsgroup, &subject, &author, &msgID, &body)
+		if err != nil {
+			return nil, fmt.Errorf("could not unmarshal db row: %w", err)
+		}
+
+		return &Article{
+			Header: Header{
+				PostedAt:  postedAt,
+				Newsgroup: newsgroup,
+				Subject:   subject,
+				Author:    author,
+				MsgID:     msgID,
+			},
+			Body: body,
 		}, nil
 	}
 
