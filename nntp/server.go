@@ -1,6 +1,7 @@
 package nntp
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -71,8 +72,14 @@ func (s Server) Close() {
 	}
 }
 
-func (s Server) Process() {
+func (s Server) Process(ctx context.Context) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	defer s.Close()
+
+	if ctx.Err() != nil {
+		return
+	}
 
 	err := s.conn.PrintfLine(POST_LINE)
 	if err != nil {
@@ -85,65 +92,90 @@ func (s Server) Process() {
 		close(requests)
 	}()
 
-	go processLoop(s.conn, s.spool, requests)
-	for {
-		line, err := s.conn.ReadLine()
-		if err != nil {
-			if err != io.EOF {
-				log.Printf("error reading line from connection: %v\n", err)
+	reader := func(ctx context.Context, lineChan chan<- string) {
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		for {
+			line, err := s.conn.ReadLine()
+			if err != nil {
+				if err != io.EOF && ctx.Err() != nil {
+					log.Printf("error reading line from connection: %v\n", err)
+				}
+				return
 			}
+			if ctx.Err() != nil {
+				return
+			}
+			lineChan <- line
+		}
+	}
+
+	lineChan := make(chan string)
+	done := make(chan struct{})
+	go reader(ctx, lineChan)
+	go processLoop(ctx, s.conn, s.spool, requests, done)
+	for {
+		select {
+		case line := <-lineChan:
+			requests <- line
+		case <-ctx.Done():
+			return
+		case <-done:
 			return
 		}
-
-		requests <- line
 	}
 }
 
-func processLoop(conn *textproto.Conn, spool *spool.Spool, requests <-chan string) {
+func processLoop(ctx context.Context, conn *textproto.Conn, spool *spool.Spool, requests <-chan string, done chan<- struct{}) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	defer func() {
+		close(done)
+	}()
+
 	for {
-		line, ok := <-requests
-		if !ok {
-			return
-		}
-
-		log.Println("Received line:", line)
-		cmd, err := parseLine(line)
-		if err != nil {
-			log.Printf("error parsing line from client: %v\n", err)
-			return
-		}
-
-		switch cmd.cmd {
-		case "CAPABILITIES":
-			if err := printCapabilities(conn); err != nil {
-				log.Printf("error sending capabilities to client: %v\n", err)
+		select {
+		case line := <-requests:
+			log.Println("Received line:", line)
+			cmd, err := parseLine(line)
+			if err != nil {
+				log.Printf("error parsing line from client: %v\n", err)
 				return
 			}
-		case "QUIT":
-			if err := printQuit(conn); err != nil {
-				log.Printf("error sending quit to client: %v\n", err)
-			}
-			return
-		case "LIST":
-			if err := printList(conn, spool, cmd.args); err != nil {
-				log.Printf("error sending list to client: %v\n", err)
-			}
-		case "GROUP":
-			if err := printGroup(conn, spool, cmd.args); err != nil {
-				log.Printf("error sending group to client: %v\n", err)
-			}
-		case "MODE":
-			if err := printMode(conn, cmd.args); err != nil {
-				log.Printf("error sending group to client: %v\n", err)
-			}
-		default:
-			log.Printf("Unknown command found: %s\n", cmd.cmd)
-			if err := printUnknown(conn); err != nil {
-				log.Printf("error printing unknown command: %v\n", err)
-				return
-			}
-		}
 
+			switch cmd.cmd {
+			case "CAPABILITIES":
+				if err := printCapabilities(conn); err != nil {
+					log.Printf("error sending capabilities to client: %v\n", err)
+					return
+				}
+			case "QUIT":
+				if err := printQuit(conn); err != nil {
+					log.Printf("error sending quit to client: %v\n", err)
+				}
+				return
+			case "LIST":
+				if err := printList(conn, spool, cmd.args); err != nil {
+					log.Printf("error sending list to client: %v\n", err)
+				}
+			case "GROUP":
+				if err := printGroup(conn, spool, cmd.args); err != nil {
+					log.Printf("error sending group to client: %v\n", err)
+				}
+			case "MODE":
+				if err := printMode(conn, cmd.args); err != nil {
+					log.Printf("error sending group to client: %v\n", err)
+				}
+			default:
+				log.Printf("Unknown command found: %s\n", cmd.cmd)
+				if err := printUnknown(conn); err != nil {
+					log.Printf("error printing unknown command: %v\n", err)
+					return
+				}
+			}
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 
