@@ -20,6 +20,14 @@ type Spool struct {
 	timeFetched bool
 }
 
+type Header struct {
+	PostedAt  string
+	Newsgroup string
+	Subject   string
+	Author    string
+	MsgID     string
+}
+
 func New(fname string) (*Spool, error) {
 	db, err := store.Open(fname)
 	if err != nil {
@@ -48,10 +56,6 @@ func (s *Spool) Close() error {
 	}
 	return nil
 }
-
-// func (r *Spool) GetArticleByNum(subreddit string, articleNum) {
-
-// }
 
 func (s *Spool) Init(startDate time.Time) error {
 	err := s.db.CreateNewSpool(startDate)
@@ -189,4 +193,30 @@ func (s *Spool) GroupArticleCount(group string) (int, error) {
 		return 0, fmt.Errorf("error getting article count for group %s: %w", group, err)
 	}
 	return count, nil
+}
+
+func (s *Spool) GetHeaderByNGNum(group string, articleNum uint) (*Header, error) {
+	rowIDs, err := s.db.GetRowIDs(group, articleNum)
+	if err != nil {
+		return nil, fmt.Errorf("error getting row ID for header request: %w", err)
+	}
+
+	if len(rowIDs) == 0 {
+		return nil, fmt.Errorf("no headers found for group %s", group)
+	}
+
+	last := rowIDs[len(rowIDs)-1]
+	dbHeader, err := s.db.GetHeaderByRowID(last)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching headers for row ID %d: %w", last, err)
+	}
+
+	header := &Header{
+		PostedAt:  dbHeader.PostedAt,
+		Newsgroup: dbHeader.Newsgroup,
+		Subject:   dbHeader.Subject,
+		Author:    dbHeader.Author,
+		MsgID:     dbHeader.MsgID,
+	}
+	return header, nil
 }

@@ -1,6 +1,7 @@
 package nntp
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -160,6 +161,10 @@ func processLoop(ctx context.Context, conn *textproto.Conn, spool *spool.Spool, 
 				}
 			case "GROUP":
 				if err := printGroup(conn, spool, cmd.args); err != nil {
+					log.Printf("error sending group to client: %v\n", err)
+				}
+			case "HEAD":
+				if err := printHead(conn, spool, cmd.args); err != nil {
 					log.Printf("error sending group to client: %v\n", err)
 				}
 			case "MODE":
@@ -336,10 +341,42 @@ func printHead(conn *textproto.Conn, spool *spool.Spool, args []string) error {
 		// Message-ID mode
 		return conn.PrintfLine("500 message-id mode unsupported")
 	} else {
-		_, err := strconv.Atoi(arg)
+		articleNum, err := strconv.Atoi(arg)
 		if err != nil {
 			return conn.PrintfLine("500 could not parse argument properly")
 		}
+
+		header, err := spool.GetHeaderByNGNum("reddit.voip", uint(articleNum))
+		if err != nil {
+			log.Println("error reading header by ng num:", err)
+			return conn.PrintfLine("423 No article with that number")
+		}
+
+		w := conn.DotWriter()
+		var buf bytes.Buffer
+		buf.WriteString(fmt.Sprintf("221 %d %s\n", articleNum, header.MsgID))
+		buf.WriteString("Path: reddit!not-for-mail\n")
+		buf.WriteString("From: ")
+		buf.WriteString(header.Author)
+		buf.WriteRune('\n')
+		buf.WriteString("Newsgroups: ")
+		buf.WriteString(header.Newsgroup)
+		buf.WriteRune('\n')
+		buf.WriteString("Subject: ")
+		buf.WriteString(header.Subject)
+		buf.WriteRune('\n')
+		buf.WriteString("Date: ")
+		buf.WriteString(header.PostedAt)
+		buf.WriteRune('\n')
+		buf.WriteString("Message-ID: ")
+		buf.WriteString(header.MsgID)
+		buf.WriteRune('\n')
+		_, err = w.Write(buf.Bytes())
+		if err != nil {
+			return fmt.Errorf("error writing header response: %w", err)
+		}
+
+		return w.Close()
 	}
 
 	return nil

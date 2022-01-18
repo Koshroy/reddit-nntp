@@ -13,6 +13,8 @@ type DB struct {
 	db *sql.DB
 }
 
+type RowID uint
+
 type ArticleRecord struct {
 	PostedAt  time.Time
 	Newsgroup string
@@ -62,7 +64,6 @@ func (db *DB) CreateNewSpool(startDate time.Time) error {
 	sqlStmtSpool := `
         CREATE TABLE spool(
                posted_at INTEGER NOT NULL,
-               subreddit TEXT NOT NULL,
                newsgroup TEXT NOT NULL,
                subject TEXT,
                author TEXT NOT NULL,
@@ -188,47 +189,76 @@ func (db *DB) GroupArticleCount(group string) (int, error) {
 	return 0, nil
 }
 
-func (db *DB) GetHeaders(group string, count uint) ([]Header, error) {
+func (db *DB) GetRowIDs(group string, count uint) ([]RowID, error) {
 	if count == 0 {
-		return nil, errors.New("error: cannot request 0 headers")
+		return nil, errors.New("error: cannot request 0 rowids")
 	}
 
-	headers := make([]Header, count)
+	rowIDs := make([]RowID, count)
 	raw := `
-        SELECT posted_at, subject, author, message_id
-        FROM spool WHERE newsgroup = ? LIMIT ?;
+        SELECT rowid
+        FROM spool WHERE newsgroup = ? ORDER BY posted_at LIMIT ?;
         `
 	stmt, err := db.db.Prepare(raw)
 	if err != nil {
-		return headers, fmt.Errorf("error preparing header query for group %s: %w", group, err)
+		return rowIDs, fmt.Errorf("error preparing rowID query for group %s: %w", group, err)
 	}
 	defer stmt.Close()
 	rows, err := stmt.Query(group, count)
 	if err != nil {
-		return headers, fmt.Errorf("error querying for headers for group %s: %w", group, err)
+		return rowIDs, fmt.Errorf("error querying for rowIDs for group %s: %w", group, err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var rowID RowID
+		err = rows.Scan(&rowID)
+		if err != nil {
+			return rowIDs, fmt.Errorf("could not unmarshal db row: %w", err)
+		}
+
+		rowIDs = append(rowIDs, rowID)
+	}
+
+	return rowIDs, nil
+}
+
+func (db *DB) GetHeaderByRowID(rowID RowID) (*Header, error) {
+	raw := `
+        SELECT posted_at, newsgroup, subject, author, message_id
+        FROM spool WHERE rowid = ?;
+        `
+	stmt, err := db.db.Prepare(raw)
+	if err != nil {
+		return nil, fmt.Errorf("error preparing header rowid %d query: %w", rowID, err)
+	}
+	defer stmt.Close()
+	rows, err := stmt.Query(rowID)
+	if err != nil {
+		return nil, fmt.Errorf("error querying for header by rowID %d: %w", rowID, err)
 	}
 	defer rows.Close()
 
 	for rows.Next() {
 		var postedAt string
+		var newsgroup string
 		var subject string
 		var author string
-		var messageID string
+		var msgID string
 
-		err = rows.Scan(&postedAt, &subject, &author, &messageID)
+		err = rows.Scan(&postedAt, &newsgroup, &subject, &author, &msgID)
 		if err != nil {
-			return headers, fmt.Errorf("could not unmarshal db row: %w", err)
+			return nil, fmt.Errorf("could not unmarshal db row: %w", err)
 		}
 
-		header := Header{
+		return &Header{
 			PostedAt:  postedAt,
-			Newsgroup: group,
+			Newsgroup: newsgroup,
 			Subject:   subject,
 			Author:    author,
-			MsgID:     messageID,
-		}
-		headers = append(headers, header)
+			MsgID:     msgID,
+		}, nil
 	}
 
-	return headers, nil
+	return nil, nil
 }
