@@ -1,6 +1,7 @@
 package spool
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -26,6 +27,29 @@ type Header struct {
 	Subject   string
 	Author    string
 	MsgID     string
+}
+
+func (h Header) Bytes() bytes.Buffer {
+	var buf bytes.Buffer
+
+	buf.WriteString("Path: reddit!not-for-mail\n")
+	buf.WriteString("From: ")
+	buf.WriteString(h.Author)
+	buf.WriteRune('\n')
+	buf.WriteString("Newsgroups: ")
+	buf.WriteString(h.Newsgroup)
+	buf.WriteRune('\n')
+	buf.WriteString("Subject: ")
+	buf.WriteString(h.Subject)
+	buf.WriteRune('\n')
+	buf.WriteString("Date: ")
+	buf.WriteString(h.PostedAt)
+	buf.WriteRune('\n')
+	buf.WriteString("Message-ID: ")
+	buf.WriteString(h.MsgID)
+	buf.WriteRune('\n')
+
+	return buf
 }
 
 func New(fname string) (*Spool, error) {

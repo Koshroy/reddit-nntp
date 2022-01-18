@@ -1,7 +1,6 @@
 package nntp
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -348,30 +347,16 @@ func printHead(conn *textproto.Conn, spool *spool.Spool, args []string) error {
 
 		header, err := spool.GetHeaderByNGNum("reddit.voip", uint(articleNum))
 		if err != nil {
-			log.Println("error reading header by ng num:", err)
 			return conn.PrintfLine("423 No article with that number")
 		}
 
 		w := conn.DotWriter()
-		var buf bytes.Buffer
-		buf.WriteString(fmt.Sprintf("221 %d %s\n", articleNum, header.MsgID))
-		buf.WriteString("Path: reddit!not-for-mail\n")
-		buf.WriteString("From: ")
-		buf.WriteString(header.Author)
-		buf.WriteRune('\n')
-		buf.WriteString("Newsgroups: ")
-		buf.WriteString(header.Newsgroup)
-		buf.WriteRune('\n')
-		buf.WriteString("Subject: ")
-		buf.WriteString(header.Subject)
-		buf.WriteRune('\n')
-		buf.WriteString("Date: ")
-		buf.WriteString(header.PostedAt)
-		buf.WriteRune('\n')
-		buf.WriteString("Message-ID: ")
-		buf.WriteString(header.MsgID)
-		buf.WriteRune('\n')
-		_, err = w.Write(buf.Bytes())
+		buf := header.Bytes()
+		_, err = w.Write([]byte(fmt.Sprintf("221 %d %s\n", articleNum, header.MsgID)))
+		if err != nil {
+			return fmt.Errorf("error writing header response header: %w", err)
+		}
+		_, err = buf.WriteTo(w)
 		if err != nil {
 			return fmt.Errorf("error writing header response: %w", err)
 		}
