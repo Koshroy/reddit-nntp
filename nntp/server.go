@@ -8,14 +8,19 @@ import (
 	"net/textproto"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/Koshroy/reddit-nntp/spool"
 )
 
+const (
+	GROUP_KEY = iota
+)
+
 type Server struct {
-	conn     *textproto.Conn
-	spool    *spool.Spool
-	curGroup string
+	conn   *textproto.Conn
+	spool  *spool.Spool
+	locals *sync.Map
 }
 
 type nntpCmd struct {
@@ -58,9 +63,12 @@ func (g groupData) String(groupMode bool) string {
 }
 
 func NewServer(conn *textproto.Conn, spool *spool.Spool) Server {
+	var locals sync.Map
+
 	return Server{
-		conn:  conn,
-		spool: spool,
+		conn:   conn,
+		spool:  spool,
+		locals: &locals,
 	}
 }
 
@@ -70,6 +78,22 @@ func (s Server) Close() {
 	if err != nil {
 		log.Println("error closing connection: %v\n", err)
 	}
+}
+
+func curGroup(locals *sync.Map) string {
+	v, ok := locals.Load(GROUP_KEY)
+	if !ok {
+		return ""
+	}
+	grp, ok := v.(string)
+	if !ok {
+		return ""
+	}
+	return grp
+}
+
+func setCurGroup(locals *sync.Map, group string) {
+	locals.Store(GROUP_KEY, group)
 }
 
 func (s Server) Process(ctx context.Context) {
@@ -92,41 +116,48 @@ func (s Server) Process(ctx context.Context) {
 		close(requests)
 	}()
 
-	reader := func(ctx context.Context, lineChan chan<- string) {
-		ctx, cancel := context.WithCancel(ctx)
-		defer cancel()
-		for {
-			line, err := s.conn.ReadLine()
-			if err != nil {
-				if err != io.EOF && ctx.Err() != nil {
-					log.Printf("error reading line from connection: %v\n", err)
-				}
-				return
-			}
-			if ctx.Err() != nil {
-				return
-			}
-			lineChan <- line
-		}
-	}
-
 	lineChan := make(chan string)
-	done := make(chan struct{})
-	go reader(ctx, lineChan)
-	go processLoop(ctx, s.conn, s.spool, requests, done)
+	doneReader := make(chan struct{})
+	doneProcess := make(chan struct{})
+	go readerLoop(ctx, s.conn, lineChan, doneReader)
+	go processLoop(ctx, s.conn, s.spool, s.locals, requests, doneProcess)
 	for {
 		select {
 		case line := <-lineChan:
 			requests <- line
 		case <-ctx.Done():
 			return
-		case <-done:
+		case <-doneReader:
+			return
+		case <-doneProcess:
 			return
 		}
 	}
 }
 
-func processLoop(ctx context.Context, conn *textproto.Conn, spool *spool.Spool, requests <-chan string, done chan<- struct{}) {
+func readerLoop(ctx context.Context, conn *textproto.Conn, lineChan chan<- string, done chan<- struct{}) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	defer func() {
+		close(done)
+	}()
+
+	for {
+		line, err := conn.ReadLine()
+		if err != nil {
+			if err != io.EOF && ctx.Err() != nil {
+				log.Printf("error reading line from connection: %v\n", err)
+			}
+			return
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		lineChan <- line
+	}
+}
+
+func processLoop(ctx context.Context, conn *textproto.Conn, spool *spool.Spool, locals *sync.Map, requests <-chan string, done chan<- struct{}) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	defer func() {
@@ -136,6 +167,10 @@ func processLoop(ctx context.Context, conn *textproto.Conn, spool *spool.Spool, 
 	for {
 		select {
 		case line := <-requests:
+			if len(line) == 0 {
+				return
+			}
+
 			log.Println("Received line:", line)
 			cmd, err := parseLine(line)
 			if err != nil {
@@ -150,24 +185,49 @@ func processLoop(ctx context.Context, conn *textproto.Conn, spool *spool.Spool, 
 					return
 				}
 			case "QUIT":
-				if err := printQuit(conn); err != nil {
-					log.Printf("error sending quit to client: %v\n", err)
-				}
+				// Ignore errors which occur during QUIT
+				printQuit(conn)
 				return
 			case "LIST":
 				if err := printList(conn, spool, cmd.args); err != nil {
 					log.Printf("error sending list to client: %v\n", err)
 				}
 			case "GROUP":
-				if err := printGroup(conn, spool, cmd.args); err != nil {
+				if len(cmd.args) < 1 {
+					err := conn.PrintfLine("500 No group name provided")
+					if err != nil {
+						log.Printf("error sending group to client: %v\n", err)
+					}
+					continue
+				}
+
+				group := cmd.args[0]
+				setCurGroup(locals, group)
+				if err := printGroup(conn, spool, group); err != nil {
 					log.Printf("error sending group to client: %v\n", err)
 				}
 			case "HEAD":
-				if err := printHead(conn, spool, cmd.args); err != nil {
+				group := curGroup(locals)
+				if len(group) == 0 {
+					err := conn.PrintfLine("500 No active group set. Server error.")
+					log.Println("No active group found for HEAD command")
+					if err != nil {
+						log.Println("error sending HEAD to client:", err)
+					}
+				}
+				if err := printHead(conn, spool, group, cmd.args); err != nil {
 					log.Printf("error sending group to client: %v\n", err)
 				}
 			case "ARTICLE":
-				if err := printArticle(conn, spool, cmd.args); err != nil {
+				group := curGroup(locals)
+				if len(group) == 0 {
+					err := conn.PrintfLine("500 No active group set. Server error.")
+					log.Println("No active group found for ARTICLE command")
+					if err != nil {
+						log.Println("error sending HEAD to client:", err)
+					}
+				}
+				if err := printArticle(conn, spool, group, cmd.args); err != nil {
 					log.Printf("error sending group to client: %v\n", err)
 				}
 			case "MODE":
@@ -297,12 +357,7 @@ func printList(conn *textproto.Conn, spool *spool.Spool, args []string) error {
 	return nil
 }
 
-func printGroup(conn *textproto.Conn, spool *spool.Spool, args []string) error {
-	if len(args) < 1 {
-		return conn.PrintfLine("500 No group name provided")
-	}
-
-	group := args[0]
+func printGroup(conn *textproto.Conn, spool *spool.Spool, group string) error {
 	count, err := spool.GroupArticleCount(group)
 	if err != nil {
 		log.Println("error getting group", group, "article count:", err)
@@ -328,7 +383,7 @@ func printGroup(conn *textproto.Conn, spool *spool.Spool, args []string) error {
 	return conn.PrintfLine("211 %s", grpData.String(true))
 }
 
-func printHead(conn *textproto.Conn, spool *spool.Spool, args []string) error {
+func printHead(conn *textproto.Conn, spool *spool.Spool, group string, args []string) error {
 	if len(args) < 1 {
 		// TODO: no arg is unsupported
 		return conn.PrintfLine("500 current article mode unsupported")
@@ -349,7 +404,7 @@ func printHead(conn *textproto.Conn, spool *spool.Spool, args []string) error {
 			return conn.PrintfLine("500 could not parse argument properly")
 		}
 
-		header, err := spool.GetHeaderByNGNum("reddit.voip", uint(articleNum))
+		header, err := spool.GetHeaderByNGNum(group, uint(articleNum))
 		if err != nil {
 			return conn.PrintfLine("423 No article with that number")
 		}
@@ -371,7 +426,7 @@ func printHead(conn *textproto.Conn, spool *spool.Spool, args []string) error {
 	return nil
 }
 
-func printArticle(conn *textproto.Conn, spool *spool.Spool, args []string) error {
+func printArticle(conn *textproto.Conn, spool *spool.Spool, group string, args []string) error {
 	if len(args) < 1 {
 		// TODO: no arg is unsupported
 		return conn.PrintfLine("500 current article mode unsupported")
@@ -392,7 +447,7 @@ func printArticle(conn *textproto.Conn, spool *spool.Spool, args []string) error
 			return conn.PrintfLine("500 could not parse argument properly")
 		}
 
-		article, err := spool.GetArticleByNGNum("reddit.voip", uint(articleNum))
+		article, err := spool.GetArticleByNGNum(group, uint(articleNum))
 		if err != nil {
 			return conn.PrintfLine("423 No article with that number")
 		}
