@@ -21,8 +21,10 @@ type Spool struct {
 	timeFetched bool
 }
 
+const nntpTimeFormat = "02 Jan 2006 15:04 -0700"
+
 type Header struct {
-	PostedAt  string
+	PostedAt  time.Time
 	Newsgroup string
 	Subject   string
 	Author    string
@@ -43,7 +45,7 @@ func (h Header) Bytes() bytes.Buffer {
 	buf.WriteString(h.Subject)
 	buf.WriteRune('\n')
 	buf.WriteString("Date: ")
-	buf.WriteString(h.PostedAt)
+	buf.WriteString(h.PostedAt.Format(nntpTimeFormat))
 	buf.WriteRune('\n')
 	buf.WriteString("Message-ID: ")
 	buf.WriteString(h.MsgID)
@@ -251,8 +253,12 @@ func (s *Spool) GetHeaderByNGNum(group string, articleNum uint) (*Header, error)
 		return nil, fmt.Errorf("error fetching headers for row ID %d: %w", last, err)
 	}
 
+	postedAt, err := store.FromDbTime(dbHeader.PostedAt)
+	if err != nil {
+		postedAt = time.UnixMilli(0)
+	}
 	header := &Header{
-		PostedAt:  dbHeader.PostedAt,
+		PostedAt:  postedAt,
 		Newsgroup: dbHeader.Newsgroup,
 		Subject:   dbHeader.Subject,
 		Author:    dbHeader.Author,
@@ -277,9 +283,13 @@ func (s *Spool) GetArticleByNGNum(group string, articleNum uint) (*Article, erro
 		return nil, fmt.Errorf("error fetching headers for row ID %d: %w", last, err)
 	}
 
+	postedAt, err := store.FromDbTime(dbArticle.Header.PostedAt)
+	if err != nil {
+		postedAt = time.UnixMilli(0)
+	}
 	article := &Article{
 		Header: Header{
-			PostedAt:  dbArticle.Header.PostedAt,
+			PostedAt:  postedAt,
 			Newsgroup: dbArticle.Header.Newsgroup,
 			Subject:   dbArticle.Header.Subject,
 			Author:    dbArticle.Header.Author,

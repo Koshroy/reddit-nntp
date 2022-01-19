@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -35,6 +36,12 @@ type Header struct {
 type Article struct {
 	Header Header
 	Body   []byte
+}
+
+const dbTimeFormat = "2006-01-02 15:04:05Z07:00"
+
+func FromDbTime(s string) (time.Time, error) {
+	return time.Parse(dbTimeFormat, strings.ReplaceAll(s, "+00:00", "Z"))
 }
 
 func Open(dbPath string) (*DB, error) {
