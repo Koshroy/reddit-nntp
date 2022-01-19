@@ -98,8 +98,8 @@ func setCurGroup(locals *sync.Map, group string) {
 
 func (s Server) Process(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 	defer s.Close()
+	defer cancel()
 
 	if ctx.Err() != nil {
 		return
@@ -185,8 +185,9 @@ func processLoop(ctx context.Context, conn *textproto.Conn, spool *spool.Spool, 
 					return
 				}
 			case "QUIT":
-				// Ignore errors which occur during QUIT
-				printQuit(conn)
+				if err := printQuit(conn); err != nil && ctx.Err() == nil {
+					log.Printf("error sending quit to client: %v\n", err)
+				}
 				return
 			case "LIST":
 				if err := printList(conn, spool, cmd.args); err != nil {
