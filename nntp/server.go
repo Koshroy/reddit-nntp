@@ -406,7 +406,7 @@ func printHead(conn *textproto.Conn, spool *spool.Spool, group string, args []st
 		}
 
 		header, err := spool.GetHeaderByNGNum(group, uint(articleNum))
-		if err != nil {
+		if err != nil || header == nil {
 			return conn.PrintfLine("423 No article with that number")
 		}
 
@@ -449,7 +449,7 @@ func printArticle(conn *textproto.Conn, spool *spool.Spool, group string, args [
 		}
 
 		article, err := spool.GetArticleByNGNum(group, uint(articleNum))
-		if err != nil {
+		if err != nil || article == nil {
 			return conn.PrintfLine("423 No article with that number")
 		}
 

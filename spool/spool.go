@@ -29,6 +29,7 @@ type Header struct {
 	Subject   string
 	Author    string
 	MsgID     string
+	ParentID  string
 }
 
 func (h Header) Bytes() bytes.Buffer {
@@ -50,6 +51,11 @@ func (h Header) Bytes() bytes.Buffer {
 	buf.WriteString("Message-ID: ")
 	buf.WriteString(h.MsgID)
 	buf.WriteRune('\n')
+	if h.ParentID != "" {
+		buf.WriteString("References: ")
+		buf.WriteString(h.ParentID)
+		buf.WriteRune('\n')
+	}
 
 	return buf
 }
@@ -128,6 +134,14 @@ func (s *Spool) addPostAndComments(pc *reddit.PostAndComments) error {
 	if err != nil {
 		return fmt.Errorf("error adding reddit post to spool: %w", err)
 	}
+
+	for _, c := range pc.Comments {
+		cA := commentToArticle(c, a.Subject)
+		err := s.db.InsertArticleRecord(&cA)
+		if err != nil {
+			return fmt.Errorf("error adding reddit comment to spool: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -138,7 +152,20 @@ func postToArticle(p *reddit.Post) store.ArticleRecord {
 		Subject:   p.Title,
 		Author:    p.Author + " <" + p.Author + "@reddit" + ">",
 		MsgID:     "<" + p.ID + ".reddit.nntp>",
+		ParentID:  "",
 		Body:      p.Body,
+	}
+}
+
+func commentToArticle(c *reddit.Comment, title string) store.ArticleRecord {
+	return store.ArticleRecord{
+		PostedAt:  c.Created.Time,
+		Newsgroup: "reddit." + strings.ToLower(c.SubredditName),
+		Subject:   "Re: " + title,
+		Author:    c.Author + " <" + c.Author + "@reddit" + ">",
+		MsgID:     "<" + c.ID + ".reddit.nntp>",
+		ParentID:  "<" + c.ParentID + ".reddit.nntp>",
+		Body:      c.Body,
 	}
 }
 
@@ -249,6 +276,9 @@ func (s *Spool) GetHeaderByNGNum(group string, articleNum uint) (*Header, error)
 
 	last := rowIDs[len(rowIDs)-1]
 	dbHeader, err := s.db.GetHeaderByRowID(last)
+	if dbHeader == nil {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("error fetching headers for row ID %d: %w", last, err)
 	}
@@ -279,6 +309,10 @@ func (s *Spool) GetArticleByNGNum(group string, articleNum uint) (*Article, erro
 
 	last := rowIDs[len(rowIDs)-1]
 	dbArticle, err := s.db.GetArticleByRowID(last)
+	if dbArticle == nil {
+		return nil, nil
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("error fetching headers for row ID %d: %w", last, err)
 	}

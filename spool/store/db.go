@@ -22,6 +22,7 @@ type ArticleRecord struct {
 	Subject   string
 	Author    string
 	MsgID     string
+	ParentID  string
 	Body      string
 }
 
@@ -31,6 +32,7 @@ type Header struct {
 	Subject   string
 	Author    string
 	MsgID     string
+	ParentID  string
 }
 
 type Article struct {
@@ -80,6 +82,7 @@ func (db *DB) CreateNewSpool(startDate time.Time) error {
                subject TEXT,
                author TEXT NOT NULL,
                message_id TEXT UNIQUE NOT NULL,
+               parent_id TEXT,
                body BLOB NOT NULL
         );
         `
@@ -101,8 +104,8 @@ func (db *DB) Close() error {
 
 func (db *DB) InsertArticleRecord(ar *ArticleRecord) error {
 	insertStmt := `
-        INSERT INTO spool(posted_at, newsgroup, subject, author, message_id, body)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO spool(posted_at, newsgroup, subject, author, message_id, parent_id, body)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         `
 	_, err := db.db.Exec(
 		insertStmt,
@@ -111,6 +114,7 @@ func (db *DB) InsertArticleRecord(ar *ArticleRecord) error {
 		ar.Subject,
 		ar.Author,
 		ar.MsgID,
+		ar.ParentID,
 		ar.Body,
 	)
 
@@ -237,7 +241,7 @@ func (db *DB) GetRowIDs(group string, count uint) ([]RowID, error) {
 
 func (db *DB) GetHeaderByRowID(rowID RowID) (*Header, error) {
 	raw := `
-        SELECT posted_at, newsgroup, subject, author, message_id
+        SELECT posted_at, newsgroup, subject, author, message_id, parent_id
         FROM spool WHERE rowid = ?;
         `
 	stmt, err := db.db.Prepare(raw)
@@ -257,8 +261,9 @@ func (db *DB) GetHeaderByRowID(rowID RowID) (*Header, error) {
 		var subject string
 		var author string
 		var msgID string
+		var parentID string
 
-		err = rows.Scan(&postedAt, &newsgroup, &subject, &author, &msgID)
+		err = rows.Scan(&postedAt, &newsgroup, &subject, &author, &msgID, &parentID)
 		if err != nil {
 			return nil, fmt.Errorf("could not unmarshal db row: %w", err)
 		}
@@ -269,6 +274,7 @@ func (db *DB) GetHeaderByRowID(rowID RowID) (*Header, error) {
 			Subject:   subject,
 			Author:    author,
 			MsgID:     msgID,
+			ParentID:  parentID,
 		}, nil
 	}
 
@@ -277,7 +283,7 @@ func (db *DB) GetHeaderByRowID(rowID RowID) (*Header, error) {
 
 func (db *DB) GetArticleByRowID(rowID RowID) (*Article, error) {
 	raw := `
-        SELECT posted_at, newsgroup, subject, author, message_id, body
+        SELECT posted_at, newsgroup, subject, author, message_id, parent_id, body
         FROM spool WHERE rowid = ?;
         `
 	stmt, err := db.db.Prepare(raw)
@@ -297,9 +303,10 @@ func (db *DB) GetArticleByRowID(rowID RowID) (*Article, error) {
 		var subject string
 		var author string
 		var msgID string
+		var parentID string
 		var body []byte
 
-		err = rows.Scan(&postedAt, &newsgroup, &subject, &author, &msgID, &body)
+		err = rows.Scan(&postedAt, &newsgroup, &subject, &author, &msgID, &parentID, &body)
 		if err != nil {
 			return nil, fmt.Errorf("could not unmarshal db row: %w", err)
 		}
@@ -311,6 +318,7 @@ func (db *DB) GetArticleByRowID(rowID RowID) (*Article, error) {
 				Subject:   subject,
 				Author:    author,
 				MsgID:     msgID,
+				ParentID:  parentID,
 			},
 			Body: body,
 		}, nil

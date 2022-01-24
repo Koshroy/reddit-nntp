@@ -14,10 +14,11 @@ import (
 
 func main() {
 	initFlag := flag.Bool("init", false, "initialize the database")
+	dbPath := flag.String("db", "/tmp/spool.db", "path to sqlite database")
 	subs := flag.Bool("subs", false, "get subreddits")
 	flag.Parse()
 
-	spool, err := spool.New("/tmp/spool.db")
+	spool, err := spool.New(*dbPath)
 	if err != nil {
 		log.Fatalln("Could not open spool:", err)
 	}
