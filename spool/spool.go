@@ -24,12 +24,12 @@ type Spool struct {
 const nntpTimeFormat = "02 Jan 2006 15:04 -0700"
 
 type Header struct {
-	PostedAt  time.Time
-	Newsgroup string
-	Subject   string
-	Author    string
-	MsgID     string
-	References  []string
+	PostedAt   time.Time
+	Newsgroup  string
+	Subject    string
+	Author     string
+	MsgID      string
+	References []string
 }
 
 func (h Header) Bytes() bytes.Buffer {
@@ -55,7 +55,7 @@ func (h Header) Bytes() bytes.Buffer {
 		buf.WriteString("References: ")
 		for i, ref := range h.References {
 			if i > 0 {
-				buf.WriteString(",")	
+				buf.WriteString(",")
 			}
 			buf.WriteString(ref)
 		}
@@ -293,11 +293,11 @@ func (s *Spool) GetHeaderByNGNum(group string, articleNum uint) (*Header, error)
 		postedAt = time.UnixMilli(0)
 	}
 	header := &Header{
-		PostedAt:  postedAt,
-		Newsgroup: dbHeader.Newsgroup,
-		Subject:   dbHeader.Subject,
-		Author:    dbHeader.Author,
-		MsgID:     dbHeader.MsgID,
+		PostedAt:   postedAt,
+		Newsgroup:  dbHeader.Newsgroup,
+		Subject:    dbHeader.Subject,
+		Author:     dbHeader.Author,
+		MsgID:      dbHeader.MsgID,
 		References: []string{dbHeader.ParentID},
 	}
 	return header, nil
@@ -329,12 +329,12 @@ func (s *Spool) GetArticleByNGNum(group string, articleNum uint) (*Article, erro
 	}
 	article := &Article{
 		Header: Header{
-			PostedAt:  postedAt,
-			Newsgroup: dbArticle.Header.Newsgroup,
-			Subject:   dbArticle.Header.Subject,
-			Author:    dbArticle.Header.Author,
-			MsgID:     dbArticle.Header.MsgID,
-			References:  []string{dbArticle.Header.ParentID},
+			PostedAt:   postedAt,
+			Newsgroup:  dbArticle.Header.Newsgroup,
+			Subject:    dbArticle.Header.Subject,
+			Author:     dbArticle.Header.Author,
+			MsgID:      dbArticle.Header.MsgID,
+			References: []string{dbArticle.Header.ParentID},
 		},
 		Body: dbArticle.Body,
 	}
