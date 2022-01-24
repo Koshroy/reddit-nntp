@@ -203,8 +203,30 @@ func processLoop(ctx context.Context, conn *textproto.Conn, spool *spool.Spool, 
 				}
 
 				group := cmd.args[0]
+				newsgroups, err := spool.Newsgroups()
+				if err != nil {
+					err = conn.PrintfLine("500 Server error: could not fetch groups")
+					if err != nil {
+						log.Printf("error sending group to client: %v\n", err)
+					}
+					continue
+				}
+
+				found := false
+				for _, ng := range newsgroups {
+					if group == ng {
+						found = true
+					}
+				}
+				if !found {
+					err = conn.PrintfLine("411 No such newsgroup")
+					if err != nil {
+						log.Printf("error sending group to client: %v\n", err)
+					}
+					continue
+				}
 				setCurGroup(locals, group)
-				if err := printGroup(conn, spool, group); err != nil {
+				if err = printGroup(conn, spool, group); err != nil {
 					log.Printf("error sending group to client: %v\n", err)
 				}
 			case "HEAD":
@@ -215,6 +237,7 @@ func processLoop(ctx context.Context, conn *textproto.Conn, spool *spool.Spool, 
 					if err != nil {
 						log.Println("error sending HEAD to client:", err)
 					}
+					continue
 				}
 				if err := printHead(conn, spool, group, cmd.args); err != nil {
 					log.Printf("error sending group to client: %v\n", err)
@@ -227,6 +250,7 @@ func processLoop(ctx context.Context, conn *textproto.Conn, spool *spool.Spool, 
 					if err != nil {
 						log.Println("error sending HEAD to client:", err)
 					}
+					continue
 				}
 				if err := printArticle(conn, spool, group, cmd.args); err != nil {
 					log.Printf("error sending group to client: %v\n", err)
@@ -239,7 +263,7 @@ func processLoop(ctx context.Context, conn *textproto.Conn, spool *spool.Spool, 
 				log.Printf("Unknown command found: %s\n", cmd.cmd)
 				if err := printUnknown(conn); err != nil {
 					log.Printf("error printing unknown command: %v\n", err)
-					return
+					continue
 				}
 			}
 		case <-ctx.Done():

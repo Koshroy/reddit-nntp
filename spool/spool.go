@@ -29,7 +29,7 @@ type Header struct {
 	Subject   string
 	Author    string
 	MsgID     string
-	ParentID  string
+	References  []string
 }
 
 func (h Header) Bytes() bytes.Buffer {
@@ -51,11 +51,16 @@ func (h Header) Bytes() bytes.Buffer {
 	buf.WriteString("Message-ID: ")
 	buf.WriteString(h.MsgID)
 	buf.WriteRune('\n')
-	if h.ParentID != "" {
+	if len(h.References) > 0 {
 		buf.WriteString("References: ")
-		buf.WriteString(h.ParentID)
-		buf.WriteRune('\n')
+		for i, ref := range h.References {
+			if i > 0 {
+				buf.WriteString(",")	
+			}
+			buf.WriteString(ref)
+		}
 	}
+	buf.WriteRune('\n')
 
 	return buf
 }
@@ -293,6 +298,7 @@ func (s *Spool) GetHeaderByNGNum(group string, articleNum uint) (*Header, error)
 		Subject:   dbHeader.Subject,
 		Author:    dbHeader.Author,
 		MsgID:     dbHeader.MsgID,
+		References: []string{dbHeader.ParentID},
 	}
 	return header, nil
 }
@@ -328,6 +334,7 @@ func (s *Spool) GetArticleByNGNum(group string, articleNum uint) (*Article, erro
 			Subject:   dbArticle.Header.Subject,
 			Author:    dbArticle.Header.Author,
 			MsgID:     dbArticle.Header.MsgID,
+			References:  []string{dbArticle.Header.ParentID},
 		},
 		Body: dbArticle.Body,
 	}
