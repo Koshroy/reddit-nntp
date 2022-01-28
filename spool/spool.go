@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/vartanbeno/go-reddit/v2/reddit"
@@ -140,7 +141,17 @@ func (s *Spool) addPostAndComments(pc *reddit.PostAndComments) error {
 		return fmt.Errorf("error adding reddit post to spool: %w", err)
 	}
 
-	for _, c := range pc.Comments {
+	commentStack := make([]*reddit.Comment, len(pc.Comments))
+	copy(commentStack, pc.Comments)
+	for true {
+		if len(commentStack) == 0 {
+			break
+		}
+		c := commentStack[0]
+		commentStack = commentStack[1:]
+		for _, c := range c.Replies.Comments {
+			commentStack = append(commentStack, c)
+		}
 		cA := commentToArticle(c, a.Subject)
 		err := s.db.InsertArticleRecord(&cA)
 		if err != nil {
@@ -156,7 +167,7 @@ func postToArticle(p *reddit.Post) store.ArticleRecord {
 		Newsgroup: "reddit." + strings.ToLower(p.SubredditName),
 		Subject:   p.Title,
 		Author:    p.Author + " <" + p.Author + "@reddit" + ">",
-		MsgID:     "<" + p.ID + ".reddit.nntp>",
+		MsgID:     "<" + p.FullID + ".reddit.nntp>",
 		ParentID:  "",
 		Body:      p.Body,
 	}
@@ -168,9 +179,46 @@ func commentToArticle(c *reddit.Comment, title string) store.ArticleRecord {
 		Newsgroup: "reddit." + strings.ToLower(c.SubredditName),
 		Subject:   "Re: " + title,
 		Author:    c.Author + " <" + c.Author + "@reddit" + ">",
-		MsgID:     "<" + c.ID + ".reddit.nntp>",
+		MsgID:     "<" + c.FullID + ".reddit.nntp>",
 		ParentID:  "<" + c.ParentID + ".reddit.nntp>",
 		Body:      c.Body,
+	}
+}
+
+func fetchComments(
+	ctx context.Context,
+	client *reddit.Client,
+	post *reddit.Post,
+	pChan chan<- *reddit.PostAndComments,
+	limiter chan bool,
+	wg *sync.WaitGroup,
+) {
+	defer wg.Done()
+	defer func() {
+		<-limiter
+	}()
+
+	limiter <- true
+	log.Println("Fetching comments for post ID:", post.ID)
+
+	pc, _, err := client.Post.Get(ctx, post.ID)
+	if err != nil {
+		log.Printf("Error fetching comments for post ID %s\n", post.ID)
+		return
+	}
+	for i := 0; i < 900; i++ {
+		if pc.HasMore() {
+			_, err := client.Post.LoadMoreComments(ctx, pc)
+			if err != nil {
+				log.Printf("Error fetching more comments: %s\n", err)
+				return
+			}
+		}
+	}
+
+	if pc != nil {
+		log.Println("Fetched", len(pc.Comments), "comments for post ID:", post.ID)
+		pChan <- pc
 	}
 }
 
@@ -210,26 +258,20 @@ func (s *Spool) FetchSubreddit(subreddit string, startDateTime time.Time) error 
 		}
 	}
 
-	postComments := make([]*reddit.PostAndComments, len(allPosts))
+	var wg sync.WaitGroup
+	pChan := make(chan *reddit.PostAndComments)
+	limiter := make(chan bool, 5)
+	postComments := make([]*reddit.PostAndComments, 0)
+	wg.Add(len(allPosts))
 	for _, p := range allPosts {
-		pc, _, err := s.client.Post.Get(context.Background(), p.ID)
-		if err != nil {
-			log.Printf("Error fetching comments for post ID %s\n", p.ID)
-			continue
-		}
+		go fetchComments(context.Background(), s.client, p, pChan, limiter, &wg)
+	}
+	go func() {
+		wg.Wait()
+		close(pChan)
+	}()
 
-		for i := 0; i < 900; i++ {
-			if pc.HasMore() {
-				_, err := s.client.Post.LoadMoreComments(context.Background(), pc)
-				if err != nil {
-					log.Printf("Error fetching more comments: %s\n", err)
-					break
-				}
-			} else {
-				break
-			}
-		}
-
+	for pc := range pChan {
 		postComments = append(postComments, pc)
 	}
 
