@@ -211,7 +211,7 @@ func (db *DB) FetchNewsgroups() ([]string, error) {
 	return groups, nil
 }
 
-func (db *DB) ArticleCount() (int, error) {
+func (db *DB) ArticleCount() (uint, error) {
 	stmt, err := db.db.Prepare("SELECT COUNT(*) FROM spool")
 	if err != nil {
 		return 0, fmt.Errorf("error preparing article count query: %w", err)
@@ -224,7 +224,7 @@ func (db *DB) ArticleCount() (int, error) {
 	defer rows.Close()
 
 	for rows.Next() {
-		var count int
+		var count uint
 		err = rows.Scan(&count)
 		if err != nil {
 			return count, fmt.Errorf("could not unmarshal db row: %w", err)

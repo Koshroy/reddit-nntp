@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"log"
 	"strings"
 	"sync"
@@ -79,9 +80,14 @@ func (a Article) Bytes() bytes.Buffer {
 	hdrBytes := a.Header.Bytes()
 	buf.ReadFrom(&hdrBytes)
 	buf.WriteRune('\n')
-	buf.Write(a.Body)
+	buf.Write(unQuoteArticle(a.Body))
 
 	return buf
+}
+
+func unQuoteArticle(body []byte) []byte {
+	bodyStr := string(body)
+	return []byte(html.UnescapeString(bodyStr))
 }
 
 func New(fname string, concLimit uint) (*Spool, error) {
@@ -148,6 +154,14 @@ func (s *Spool) StartDate() (*time.Time, error) {
 	s.timeFetched = true
 
 	return t, nil
+}
+
+func (s *Spool) ArticleCount() (uint, error) {
+	count, err := s.db.ArticleCount()
+	if err != nil {
+		return 0, fmt.Errorf("error fetching article count: %w", err)
+	}
+	return count, nil
 }
 
 func (s *Spool) addPostAndComments(pc *reddit.PostAndComments) error {

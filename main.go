@@ -60,12 +60,22 @@ func main() {
 		if err != nil {
 			log.Fatalln("Could not fetch start date:", err)
 		}
-		err = spool.FetchSubreddit("VOIP", *startDate)
-		if err != nil {
-			log.Fatalln("Could not fetch sub:", err)
+		for _, sub := range cfg.Subreddits {
+			err = spool.FetchSubreddit(sub, *startDate)
+			if err != nil {
+				log.Fatalln("Could not fetch sub:", err)
+			}
+			log.Println("Finished populating subreddit", sub)
 		}
-		log.Println("Populated spool with sub")
+		log.Println("Finished populating spool")
 		return
+	}
+
+	count, err := spool.ArticleCount()
+	if err != nil {
+		log.Fatalln("error: spool is probably empty:", err)
+	} else if count == 0 {
+		log.Fatalln("spool has no articles, exiting")
 	}
 
 	readerListener, err := net.Listen("tcp", cfg.Listener)
@@ -76,7 +86,6 @@ func main() {
 
 	log.Println("Listening on", cfg.Listener)
 
-	//go acceptorLoop(ctx, transitListener, TRANSIT_LISTENER)
 	acceptorLoop(readerListener, spool)
 }
 
