@@ -20,6 +20,8 @@ type Spool struct {
 	client      *reddit.Client
 	startDate   *time.Time
 	timeFetched bool
+	prefix      string
+	concLimit   uint
 }
 
 const nntpTimeFormat = "02 Jan 2006 15:04 -0700"
@@ -82,7 +84,7 @@ func (a Article) Bytes() bytes.Buffer {
 	return buf
 }
 
-func New(fname string) (*Spool, error) {
+func New(fname string, concLimit uint) (*Spool, error) {
 	db, err := store.Open(fname)
 	if err != nil {
 		return nil, fmt.Errorf("could not open DB: %w", err)
@@ -90,7 +92,6 @@ func New(fname string) (*Spool, error) {
 
 	client, err := reddit.NewReadonlyClient()
 	if err != nil {
-		db.Close()
 		return nil, fmt.Errorf("could not open Reddit client: %w", err)
 	}
 
@@ -100,23 +101,38 @@ func New(fname string) (*Spool, error) {
 		client:      client,
 		startDate:   &now,
 		timeFetched: false,
+		concLimit:   concLimit,
+		prefix:      "",
 	}, nil
 }
 
 func (s *Spool) Close() error {
 	err := s.db.Close()
 	if err != nil {
-		return fmt.Errorf("error closing reddit spool: %w", s.db.Close())
+		return fmt.Errorf("error closing reddit spool: %w", err)
 	}
 	return nil
 }
 
-func (s *Spool) Init(startDate time.Time) error {
-	err := s.db.CreateNewSpool(startDate)
+func (s *Spool) Init(startDate time.Time, prefix string) error {
+	err := s.db.CreateNewSpool(startDate, prefix)
 	if err != nil {
 		return fmt.Errorf("Error initializing spool: %w", err)
 	}
 	return nil
+}
+
+func (s *Spool) Prefix() (string, error) {
+	if s.prefix != "" {
+		return s.prefix, nil
+	}
+
+	p, err := s.db.GetPrefix()
+	if err != nil {
+		return "", fmt.Errorf("error fetching prefix: %w", err)
+	}
+	s.prefix = p
+	return s.prefix, nil
 }
 
 func (s *Spool) StartDate() (*time.Time, error) {
@@ -135,8 +151,12 @@ func (s *Spool) StartDate() (*time.Time, error) {
 }
 
 func (s *Spool) addPostAndComments(pc *reddit.PostAndComments) error {
-	a := postToArticle(pc.Post)
-	err := s.db.InsertArticleRecord(&a)
+	prefix, err := s.Prefix()
+	if err != nil {
+		return fmt.Errorf("error getting prefix: %w", err)
+	}
+	a := postToArticle(pc.Post, prefix)
+	err = s.db.InsertArticleRecord(&a)
 	if err != nil {
 		return fmt.Errorf("error adding reddit post to spool: %w", err)
 	}
@@ -152,7 +172,7 @@ func (s *Spool) addPostAndComments(pc *reddit.PostAndComments) error {
 		for _, c := range c.Replies.Comments {
 			commentStack = append(commentStack, c)
 		}
-		cA := commentToArticle(c, a.Subject)
+		cA := commentToArticle(c, a.Subject, prefix)
 		err := s.db.InsertArticleRecord(&cA)
 		if err != nil {
 			return fmt.Errorf("error adding reddit comment to spool: %w", err)
@@ -161,26 +181,26 @@ func (s *Spool) addPostAndComments(pc *reddit.PostAndComments) error {
 	return nil
 }
 
-func postToArticle(p *reddit.Post) store.ArticleRecord {
+func postToArticle(p *reddit.Post, prefix string) store.ArticleRecord {
 	return store.ArticleRecord{
 		PostedAt:  p.Created.Time,
-		Newsgroup: "reddit." + strings.ToLower(p.SubredditName),
+		Newsgroup: prefix + "." + strings.ToLower(p.SubredditName),
 		Subject:   p.Title,
-		Author:    p.Author + " <" + p.Author + "@reddit" + ">",
-		MsgID:     "<" + p.FullID + ".reddit.nntp>",
+		Author:    p.Author + " <" + p.Author + "@" + prefix + ">",
+		MsgID:     "<" + p.FullID + "." + prefix + ".nntp>",
 		ParentID:  "",
 		Body:      p.Body,
 	}
 }
 
-func commentToArticle(c *reddit.Comment, title string) store.ArticleRecord {
+func commentToArticle(c *reddit.Comment, title, prefix string) store.ArticleRecord {
 	return store.ArticleRecord{
 		PostedAt:  c.Created.Time,
-		Newsgroup: "reddit." + strings.ToLower(c.SubredditName),
+		Newsgroup: prefix + "." + strings.ToLower(c.SubredditName),
 		Subject:   "Re: " + title,
-		Author:    c.Author + " <" + c.Author + "@reddit" + ">",
-		MsgID:     "<" + c.FullID + ".reddit.nntp>",
-		ParentID:  "<" + c.ParentID + ".reddit.nntp>",
+		Author:    c.Author + " <" + c.Author + "@" + prefix + ">",
+		MsgID:     "<" + c.FullID + "." + prefix + ".nntp>",
+		ParentID:  "<" + c.ParentID + "." + prefix + ".nntp>",
 		Body:      c.Body,
 	}
 }
@@ -260,7 +280,7 @@ func (s *Spool) FetchSubreddit(subreddit string, startDateTime time.Time) error 
 
 	var wg sync.WaitGroup
 	pChan := make(chan *reddit.PostAndComments)
-	limiter := make(chan bool, 5)
+	limiter := make(chan bool, s.concLimit)
 	postComments := make([]*reddit.PostAndComments, 0)
 	wg.Add(len(allPosts))
 	for _, p := range allPosts {

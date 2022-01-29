@@ -57,7 +57,7 @@ func Open(dbPath string) (*DB, error) {
 	}, nil
 }
 
-func (db *DB) CreateNewSpool(startDate time.Time) error {
+func (db *DB) CreateNewSpool(startDate time.Time, prefix string) error {
 	sqlStmtConfig := `
         CREATE TABLE config(
                k TEXT NOT NULL,
@@ -73,6 +73,10 @@ func (db *DB) CreateNewSpool(startDate time.Time) error {
 	_, err = db.db.Exec(sqlStmtDt, "startdate", startDate.Format(time.RFC3339))
 	if err != nil {
 		return fmt.Errorf("error adding start date to config table in spool: %w", err)
+	}
+	_, err = db.db.Exec(sqlStmtDt, "prefix", prefix)
+	if err != nil {
+		return fmt.Errorf("error adding prefix to config table in spool: %w", err)
 	}
 
 	sqlStmtSpool := `
@@ -95,7 +99,7 @@ func (db *DB) CreateNewSpool(startDate time.Time) error {
 }
 
 func (db *DB) Close() error {
-	err := db.Close()
+	err := db.db.Close()
 	if err != nil {
 		return fmt.Errorf("error closing database: %w", err)
 	}
@@ -156,6 +160,32 @@ func (db *DB) GetStartDate() (*time.Time, error) {
 	return nil, errors.New("could not find start time in spool db")
 }
 
+func (db *DB) GetPrefix() (string, error) {
+	stmt, err := db.db.Prepare("SELECT v FROM config WHERE k = ?")
+	if err != nil {
+		return "", fmt.Errorf("error preparing prefix query: %w", err)
+	}
+	defer stmt.Close()
+
+	rows, err := stmt.Query("prefix")
+	if err != nil {
+		return "", fmt.Errorf("error querying for prefix: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var prefix string
+		err = rows.Scan(&prefix)
+		if err != nil {
+			return "", fmt.Errorf("could not unmarshal db row: %w", err)
+		}
+
+		return prefix, nil
+	}
+
+	return "", errors.New("could not find start time in spool db")
+}
+
 func (db *DB) FetchNewsgroups() ([]string, error) {
 	stmt, err := db.db.Prepare("SELECT DISTINCT newsgroup FROM spool")
 	if err != nil {
@@ -179,6 +209,31 @@ func (db *DB) FetchNewsgroups() ([]string, error) {
 	}
 
 	return groups, nil
+}
+
+func (db *DB) ArticleCount() (int, error) {
+	stmt, err := db.db.Prepare("SELECT COUNT(*) FROM spool")
+	if err != nil {
+		return 0, fmt.Errorf("error preparing article count query: %w", err)
+	}
+	defer stmt.Close()
+	rows, err := stmt.Query()
+	if err != nil {
+		return 0, fmt.Errorf("error querying for article count: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var count int
+		err = rows.Scan(&count)
+		if err != nil {
+			return count, fmt.Errorf("could not unmarshal db row: %w", err)
+		}
+		return count, nil
+	}
+
+	return 0, nil
+
 }
 
 func (db *DB) GroupArticleCount(group string) (int, error) {

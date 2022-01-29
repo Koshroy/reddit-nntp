@@ -367,19 +367,24 @@ func printList(conn *textproto.Conn, spool *spool.Spool, args []string) error {
 		return conn.PrintfLine("403 error reading from spool")
 	}
 
-	err = conn.PrintfLine("215 list of newsgroups follows")
+	w := conn.DotWriter()
+	_, err = w.Write([]byte("215 list of newsgroups follows\n"))
 	if err != nil {
 		return fmt.Errorf("error returning active list status line: %w", err)
 	}
 
 	for _, data := range datum {
-		err := conn.PrintfLine("%s\n.", data.String(false))
+		_, err = w.Write([]byte(data.String(false)))
+		if err != nil {
+			return fmt.Errorf("error writing group response line to socket: %w", err)
+		}
+		_, err = w.Write([]byte("\n"))
 		if err != nil {
 			return fmt.Errorf("error writing group response line to socket: %w", err)
 		}
 	}
 
-	return nil
+	return w.Close()
 }
 
 func printGroup(conn *textproto.Conn, spool *spool.Spool, group string) error {
@@ -481,7 +486,7 @@ func printArticle(conn *textproto.Conn, spool *spool.Spool, group string, args [
 		buf := article.Bytes()
 		_, err = w.Write([]byte(fmt.Sprintf("220 %d %s\n", articleNum, article.Header.MsgID)))
 		if err != nil {
-			return fmt.Errorf("error writing header response header: %w", err)
+			return fmt.Errorf("error writing article response header: %w", err)
 		}
 		_, err = buf.WriteTo(w)
 		if err != nil {
