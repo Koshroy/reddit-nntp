@@ -3,7 +3,6 @@ package spool
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"html"
 	"log"
@@ -175,35 +174,49 @@ func (s *Spool) ArticleCount() (uint, error) {
 	return count, nil
 }
 
-func (s *Spool) addPostAndComments(pc *reddit.PostAndComments) error {
+func (s *Spool) addPostAndComments(pcChan chan *reddit.PostAndComments, wg *sync.WaitGroup) {
 	prefix, err := s.Prefix()
+	noPrefix := false
 	if err != nil {
-		return fmt.Errorf("error getting prefix: %w", err)
-	}
-	a := postToArticle(pc.Post, prefix)
-	err = s.db.InsertArticleRecord(&a)
-	if err != nil {
-		return fmt.Errorf("error adding reddit post to spool: %w", err)
+		log.Println("error getting prefix:", err)
+		noPrefix = true
 	}
 
-	commentStack := make([]*reddit.Comment, len(pc.Comments))
-	copy(commentStack, pc.Comments)
-	for true {
-		if len(commentStack) == 0 {
-			break
+	for pc := range pcChan {
+		if noPrefix {
+			wg.Done()
+			continue
 		}
-		c := commentStack[0]
-		commentStack = commentStack[1:]
-		for _, c := range c.Replies.Comments {
-			commentStack = append(commentStack, c)
-		}
-		cA := commentToArticle(c, a.Subject, prefix)
-		err := s.db.InsertArticleRecord(&cA)
+
+		a := postToArticle(pc.Post, prefix)
+		err = s.db.InsertArticleRecord(&a)
 		if err != nil {
-			return fmt.Errorf("error adding reddit comment to spool: %w", err)
+			log.Println("error adding reddit post to spool:", err)
+			wg.Done()
+			continue
 		}
+
+		commentStack := make([]*reddit.Comment, len(pc.Comments))
+		copy(commentStack, pc.Comments)
+		for true {
+			if len(commentStack) == 0 {
+				break
+			}
+			c := commentStack[0]
+			commentStack = commentStack[1:]
+			for _, c := range c.Replies.Comments {
+				commentStack = append(commentStack, c)
+			}
+			cA := commentToArticle(c, a.Subject, prefix)
+			err := s.db.InsertArticleRecord(&cA)
+			if err != nil {
+				log.Println("error adding reddit comment to spool:", err)
+				break
+			}
+		}
+
+		wg.Done()
 	}
-	return nil
 }
 
 func postToArticle(p *reddit.Post, prefix string) store.ArticleRecord {
@@ -320,9 +333,11 @@ func (s *Spool) FetchSubreddit(subreddit string, startDateTime time.Time, pageFe
 	}
 
 	var wg sync.WaitGroup
+	var spoolWg sync.WaitGroup
 	pChan := make(chan *reddit.PostAndComments)
+	spoolPCChan := make(chan *reddit.PostAndComments)
 	limiter := make(chan bool, s.concLimit)
-	postComments := make([]*reddit.PostAndComments, 0)
+	go s.addPostAndComments(spoolPCChan, &spoolWg)
 	wg.Add(len(allPosts))
 	for _, p := range allPosts {
 		go fetchComments(
@@ -337,20 +352,12 @@ func (s *Spool) FetchSubreddit(subreddit string, startDateTime time.Time, pageFe
 	}()
 
 	for pc := range pChan {
-		postComments = append(postComments, pc)
+		spoolWg.Add(1)
+		spoolPCChan <- pc
 	}
 
-	if len(postComments) == 0 {
-		return errors.New("could not fetch any posts")
-	}
-
-	for _, pc := range postComments {
-		err := s.addPostAndComments(pc)
-		if err != nil {
-			log.Printf("error adding postcomments to spool: %v\n", err)
-		}
-	}
-
+	spoolWg.Wait()
+	close(spoolPCChan)
 	return nil
 }
 
