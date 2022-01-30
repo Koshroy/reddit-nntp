@@ -171,7 +171,7 @@ func processLoop(ctx context.Context, conn *textproto.Conn, spool *spool.Spool, 
 				return
 			}
 
-			log.Println("Received line:", line)
+			// log.Println("Received line:", line)
 			cmd, err := parseLine(line)
 			if err != nil {
 				log.Printf("error parsing line from client: %v\n", err)

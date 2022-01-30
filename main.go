@@ -40,7 +40,12 @@ func main() {
 		log.Fatalln("could not parse config file:", err)
 	}
 
-	spool, err := spool.New(*dbPath, cfg.ConcurrencyLimit)
+	spool, err := spool.New(*dbPath, cfg.ConcurrencyLimit, &spool.Credentials{
+		ID:       cfg.BotCredentials.ID,
+		Secret:   cfg.BotCredentials.Secret,
+		Username: cfg.BotCredentials.Username,
+		Password: cfg.BotCredentials.Password,
+	})
 	if err != nil {
 		log.Fatalln("Could not open spool:", err)
 	}
@@ -55,13 +60,18 @@ func main() {
 	}
 
 	if *subs {
+		if cfg.PageFetchLimit == 0 {
+			log.Fatalln("PageFetchLimit not set in config, exiting.")
+		}
+
 		log.Println("Populating spool with subs")
 		startDate, err := spool.StartDate()
 		if err != nil {
 			log.Fatalln("Could not fetch start date:", err)
 		}
 		for _, sub := range cfg.Subreddits {
-			err = spool.FetchSubreddit(sub, *startDate)
+			log.Println("Fetching sub", sub)
+			err = spool.FetchSubreddit(sub, *startDate, cfg.PageFetchLimit, cfg.IgnoreTick)
 			if err != nil {
 				log.Fatalln("Could not fetch sub:", err)
 			}

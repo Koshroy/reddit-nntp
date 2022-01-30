@@ -8,10 +8,20 @@ import (
 	toml "github.com/pelletier/go-toml/v2"
 )
 
+type Credentials struct {
+	ID       string
+	Secret   string
+	Username string
+	Password string
+}
+
 type Config struct {
 	ConcurrencyLimit uint
+	IgnoreTick       bool
 	Listener         string
 	Subreddits       []string
+	PageFetchLimit   uint
+	BotCredentials   Credentials
 }
 
 func ParseFile(path string) (*Config, error) {

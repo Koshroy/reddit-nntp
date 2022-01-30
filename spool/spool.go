@@ -25,6 +25,8 @@ type Spool struct {
 	concLimit   uint
 }
 
+type Credentials = reddit.Credentials
+
 const nntpTimeFormat = "02 Jan 2006 15:04 -0700"
 
 type Header struct {
@@ -59,7 +61,7 @@ func (h Header) Bytes() bytes.Buffer {
 		buf.WriteString("References: ")
 		for i, ref := range h.References {
 			if i > 0 {
-				buf.WriteString(",")
+				buf.WriteRune(',')
 			}
 			buf.WriteString(ref)
 		}
@@ -90,15 +92,24 @@ func unQuoteArticle(body []byte) []byte {
 	return []byte(html.UnescapeString(bodyStr))
 }
 
-func New(fname string, concLimit uint) (*Spool, error) {
+func New(fname string, concLimit uint, creds *reddit.Credentials) (*Spool, error) {
 	db, err := store.Open(fname)
 	if err != nil {
 		return nil, fmt.Errorf("could not open DB: %w", err)
 	}
 
-	client, err := reddit.NewReadonlyClient()
-	if err != nil {
-		return nil, fmt.Errorf("could not open Reddit client: %w", err)
+	ua := reddit.WithUserAgent("server:reddit-nntp:0.0.1")
+	var client *reddit.Client
+	if creds == nil {
+		client, err = reddit.NewReadonlyClient(ua)
+		if err != nil {
+			return nil, fmt.Errorf("could not open Reddit client: %w", err)
+		}
+	} else {
+		client, err = reddit.NewClient(*creds, ua)
+		if err != nil {
+			return nil, fmt.Errorf("could not open Reddit client with creds: %w", err)
+		}
 	}
 
 	now := time.Now()
@@ -200,8 +211,8 @@ func postToArticle(p *reddit.Post, prefix string) store.ArticleRecord {
 		PostedAt:  p.Created.Time,
 		Newsgroup: prefix + "." + strings.ToLower(p.SubredditName),
 		Subject:   p.Title,
-		Author:    p.Author + " <" + p.Author + "@" + prefix + ">",
-		MsgID:     "<" + p.FullID + "." + prefix + ".nntp>",
+		Author:    fmt.Sprintf("%s <%s@%s>", p.Author, p.Author, prefix),
+		MsgID:     fmt.Sprintf("<%s.%s.%s.nntp>", p.FullID, p.SubredditID, prefix),
 		ParentID:  "",
 		Body:      p.Body,
 	}
@@ -212,9 +223,9 @@ func commentToArticle(c *reddit.Comment, title, prefix string) store.ArticleReco
 		PostedAt:  c.Created.Time,
 		Newsgroup: prefix + "." + strings.ToLower(c.SubredditName),
 		Subject:   "Re: " + title,
-		Author:    c.Author + " <" + c.Author + "@" + prefix + ">",
-		MsgID:     "<" + c.FullID + "." + prefix + ".nntp>",
-		ParentID:  "<" + c.ParentID + "." + prefix + ".nntp>",
+		Author:    fmt.Sprintf("%s <%s@%s>", c.Author, c.Author, prefix),
+		MsgID:     fmt.Sprintf("<%s.%s.%s.nntp>", c.FullID, c.SubredditID, prefix),
+		ParentID:  fmt.Sprintf("<%s.%s.%s.nntp>", c.ParentID, c.SubredditID, prefix),
 		Body:      c.Body,
 	}
 }
@@ -225,6 +236,8 @@ func fetchComments(
 	post *reddit.Post,
 	pChan chan<- *reddit.PostAndComments,
 	limiter chan bool,
+	ticker <-chan time.Time,
+	ignoreTick bool,
 	wg *sync.WaitGroup,
 ) {
 	defer wg.Done()
@@ -233,15 +246,21 @@ func fetchComments(
 	}()
 
 	limiter <- true
-	log.Println("Fetching comments for post ID:", post.ID)
+	if !ignoreTick {
+		<-ticker
+	}
 
 	pc, _, err := client.Post.Get(ctx, post.ID)
 	if err != nil {
-		log.Printf("Error fetching comments for post ID %s\n", post.ID)
+		log.Println("Error fetching comments for post ID", post.ID, ":", err)
 		return
 	}
 	for i := 0; i < 900; i++ {
 		if pc.HasMore() {
+			if !ignoreTick {
+				<-ticker
+			}
+
 			_, err := client.Post.LoadMoreComments(ctx, pc)
 			if err != nil {
 				log.Printf("Error fetching more comments: %s\n", err)
@@ -256,11 +275,17 @@ func fetchComments(
 	}
 }
 
-func (s *Spool) FetchSubreddit(subreddit string, startDateTime time.Time) error {
+func (s *Spool) FetchSubreddit(subreddit string, startDateTime time.Time, pageFetchLimit uint, ignoreTick bool) error {
 	allPosts := make([]*reddit.Post, 0)
 	results := false
-	for {
-		posts, _, err := s.client.Subreddit.NewPosts(
+
+	ticker := time.Tick(1 * time.Second)
+	for i := uint(0); i < pageFetchLimit; i++ {
+		if !ignoreTick {
+			<-ticker
+		}
+
+		posts, resp, err := s.client.Subreddit.NewPosts(
 			context.Background(),
 			subreddit,
 			&reddit.ListOptions{
@@ -277,9 +302,11 @@ func (s *Spool) FetchSubreddit(subreddit string, startDateTime time.Time) error 
 			}
 			break
 		}
+		log.Println("Rate limit remaining:", resp.Rate.Remaining)
 		if len(posts) == 0 {
 			break
 		}
+		log.Println("Fetched", len(posts), "posts")
 
 		minTime := posts[0].Created
 		for _, p := range posts {
@@ -298,7 +325,11 @@ func (s *Spool) FetchSubreddit(subreddit string, startDateTime time.Time) error 
 	postComments := make([]*reddit.PostAndComments, 0)
 	wg.Add(len(allPosts))
 	for _, p := range allPosts {
-		go fetchComments(context.Background(), s.client, p, pChan, limiter, &wg)
+		go fetchComments(
+			context.Background(),
+			s.client, p, pChan, limiter,
+			ticker, ignoreTick, &wg,
+		)
 	}
 	go func() {
 		wg.Wait()
@@ -314,10 +345,6 @@ func (s *Spool) FetchSubreddit(subreddit string, startDateTime time.Time) error 
 	}
 
 	for _, pc := range postComments {
-		if pc == nil {
-			log.Println("Skipping empty postcomment")
-			continue
-		}
 		err := s.addPostAndComments(pc)
 		if err != nil {
 			log.Printf("error adding postcomments to spool: %v\n", err)
