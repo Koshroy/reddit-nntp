@@ -413,7 +413,7 @@ func printGroup(conn *textproto.Conn, spool *spool.Spool, group string) error {
 	return conn.PrintfLine("211 %s", grpData.String(true))
 }
 
-func printHead(conn *textproto.Conn, spool *spool.Spool, group string, args []string) error {
+func printHead(conn *textproto.Conn, sp *spool.Spool, group string, args []string) error {
 	if len(args) < 1 {
 		// TODO: no arg is unsupported
 		return conn.PrintfLine("500 current article mode unsupported")
@@ -425,38 +425,41 @@ func printHead(conn *textproto.Conn, spool *spool.Spool, group string, args []st
 		return conn.PrintfLine("500 could not parse line properly")
 	}
 
+	var header *spool.Header
+	var err error
+	var articleNum int
 	if arg[0] == '<' && arg[len(arg)-1] == '>' {
 		// Message-ID mode
-		return conn.PrintfLine("500 message-id mode unsupported")
+		header, err = sp.GetHeaderByMsgID(group, arg)
+		articleNum = 0
 	} else {
-		articleNum, err := strconv.Atoi(arg)
+		articleNum, err = strconv.Atoi(arg)
 		if err != nil {
 			return conn.PrintfLine("500 could not parse argument properly")
 		}
 
-		header, err := spool.GetHeaderByNGNum(group, uint(articleNum))
-		if err != nil || header == nil {
-			return conn.PrintfLine("423 No article with that number")
-		}
-
-		w := conn.DotWriter()
-		buf := header.Bytes()
-		_, err = w.Write([]byte(fmt.Sprintf("221 %d %s\n", articleNum, header.MsgID)))
-		if err != nil {
-			return fmt.Errorf("error writing header response header: %w", err)
-		}
-		_, err = buf.WriteTo(w)
-		if err != nil {
-			return fmt.Errorf("error writing header response: %w", err)
-		}
-
-		return w.Close()
+		header, err = sp.GetHeaderByNGNum(group, uint(articleNum))
 	}
 
-	return nil
+	if err != nil || header == nil {
+		return conn.PrintfLine("423 No article with that number")
+	}
+
+	w := conn.DotWriter()
+	buf := header.Bytes()
+	_, err = w.Write([]byte(fmt.Sprintf("221 %d %s\n", articleNum, header.MsgID)))
+	if err != nil {
+		return fmt.Errorf("error writing header response header: %w", err)
+	}
+	_, err = buf.WriteTo(w)
+	if err != nil {
+		return fmt.Errorf("error writing header response: %w", err)
+	}
+
+	return w.Close()
 }
 
-func printArticle(conn *textproto.Conn, spool *spool.Spool, group string, args []string) error {
+func printArticle(conn *textproto.Conn, sp *spool.Spool, group string, args []string) error {
 	if len(args) < 1 {
 		// TODO: no arg is unsupported
 		return conn.PrintfLine("500 current article mode unsupported")
@@ -468,33 +471,36 @@ func printArticle(conn *textproto.Conn, spool *spool.Spool, group string, args [
 		return conn.PrintfLine("500 could not parse line properly")
 	}
 
+	var article *spool.Article
+	var err error
+	var articleNum int
 	if arg[0] == '<' && arg[len(arg)-1] == '>' {
 		// Message-ID mode
-		return conn.PrintfLine("500 message-id mode unsupported")
+		article, err = sp.GetArticleByMsgID(group, arg)
+		articleNum = 0
 	} else {
-		articleNum, err := strconv.Atoi(arg)
+		articleNum, err = strconv.Atoi(arg)
 		if err != nil {
 			return conn.PrintfLine("500 could not parse argument properly")
 		}
 
-		article, err := spool.GetArticleByNGNum(group, uint(articleNum))
-		if err != nil || article == nil {
-			return conn.PrintfLine("423 No article with that number")
-		}
-
-		w := conn.DotWriter()
-		buf := article.Bytes()
-		_, err = w.Write([]byte(fmt.Sprintf("220 %d %s\n", articleNum, article.Header.MsgID)))
-		if err != nil {
-			return fmt.Errorf("error writing article response header: %w", err)
-		}
-		_, err = buf.WriteTo(w)
-		if err != nil {
-			return fmt.Errorf("error writing article response: %w", err)
-		}
-
-		return w.Close()
+		article, err = sp.GetArticleByNGNum(group, uint(articleNum))
 	}
 
-	return nil
+	if err != nil || article == nil {
+		return conn.PrintfLine("423 No article with that number")
+	}
+
+	w := conn.DotWriter()
+	buf := article.Bytes()
+	_, err = w.Write([]byte(fmt.Sprintf("220 %d %s\n", articleNum, article.Header.MsgID)))
+	if err != nil {
+		return fmt.Errorf("error writing article response header: %w", err)
+	}
+	_, err = buf.WriteTo(w)
+	if err != nil {
+		return fmt.Errorf("error writing article response: %w", err)
+	}
+
+	return w.Close()
 }

@@ -2,12 +2,9 @@ package spool
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"html"
-	"log"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/vartanbeno/go-reddit/v2/reddit"
@@ -87,7 +84,7 @@ func (a Article) Bytes() bytes.Buffer {
 }
 
 func unQuoteArticle(body []byte) []byte {
-	bodyStr := string(body)
+	bodyStr := strings.ReplaceAll(string(body), "&#x200B;", "")
 	return []byte(html.UnescapeString(bodyStr))
 }
 
@@ -175,6 +172,13 @@ func (s *Spool) ArticleCount() (uint, error) {
 }
 
 func postToArticle(p *reddit.Post, prefix string) store.ArticleRecord {
+	var body string
+	if p.Body == "" {
+		body = p.URL
+	} else {
+		body = p.Body
+	}
+
 	return store.ArticleRecord{
 		PostedAt:  p.Created.Time,
 		Newsgroup: prefix + "." + strings.ToLower(p.SubredditName),
@@ -182,7 +186,7 @@ func postToArticle(p *reddit.Post, prefix string) store.ArticleRecord {
 		Author:    fmt.Sprintf("%s <%s@%s>", p.Author, p.Author, prefix),
 		MsgID:     fmt.Sprintf("<%s.%s.%s.nntp>", p.FullID, p.SubredditID, prefix),
 		ParentID:  "",
-		Body:      p.Body,
+		Body:      body,
 	}
 }
 
@@ -195,51 +199,6 @@ func commentToArticle(c *reddit.Comment, title, prefix string) store.ArticleReco
 		MsgID:     fmt.Sprintf("<%s.%s.%s.nntp>", c.FullID, c.SubredditID, prefix),
 		ParentID:  fmt.Sprintf("<%s.%s.%s.nntp>", c.ParentID, c.SubredditID, prefix),
 		Body:      c.Body,
-	}
-}
-
-func fetchComments(
-	ctx context.Context,
-	client *reddit.Client,
-	post *reddit.Post,
-	pChan chan<- *reddit.PostAndComments,
-	limiter chan bool,
-	ticker <-chan time.Time,
-	ignoreTick bool,
-	wg *sync.WaitGroup,
-) {
-	defer wg.Done()
-	defer func() {
-		<-limiter
-	}()
-
-	limiter <- true
-	if !ignoreTick {
-		<-ticker
-	}
-
-	pc, _, err := client.Post.Get(ctx, post.ID)
-	if err != nil {
-		log.Println("Error fetching comments for post ID", post.ID, ":", err)
-		return
-	}
-	for i := 0; i < 900; i++ {
-		if pc.HasMore() {
-			if !ignoreTick {
-				<-ticker
-			}
-
-			_, err := client.Post.LoadMoreComments(ctx, pc)
-			if err != nil {
-				log.Printf("Error fetching more comments: %s\n", err)
-				return
-			}
-		}
-	}
-
-	if pc != nil {
-		log.Println("Fetched", len(pc.Comments), "comments for post ID:", post.ID)
-		pChan <- pc
 	}
 }
 
@@ -295,6 +254,27 @@ func (s *Spool) GetHeaderByNGNum(group string, articleNum uint) (*Header, error)
 	return header, nil
 }
 
+func (s *Spool) GetHeaderByMsgID(group string, msgID string) (*Header, error) {
+	dbHeader, err := s.db.GetHeaderByMsgID(msgID)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching headers for msg ID %s: %w", msgID, err)
+	}
+
+	postedAt, err := store.FromDbTime(dbHeader.PostedAt)
+	if err != nil {
+		postedAt = time.UnixMilli(0)
+	}
+	header := &Header{
+		PostedAt:   postedAt,
+		Newsgroup:  dbHeader.Newsgroup,
+		Subject:    dbHeader.Subject,
+		Author:     dbHeader.Author,
+		MsgID:      dbHeader.MsgID,
+		References: []string{dbHeader.ParentID},
+	}
+	return header, nil
+}
+
 func (s *Spool) GetArticleByNGNum(group string, articleNum uint) (*Article, error) {
 	rowIDs, err := s.db.GetRowIDs(group, articleNum)
 	if err != nil {
@@ -313,6 +293,30 @@ func (s *Spool) GetArticleByNGNum(group string, articleNum uint) (*Article, erro
 
 	if err != nil {
 		return nil, fmt.Errorf("error fetching headers for row ID %d: %w", last, err)
+	}
+
+	postedAt, err := store.FromDbTime(dbArticle.Header.PostedAt)
+	if err != nil {
+		postedAt = time.UnixMilli(0)
+	}
+	article := &Article{
+		Header: Header{
+			PostedAt:   postedAt,
+			Newsgroup:  dbArticle.Header.Newsgroup,
+			Subject:    dbArticle.Header.Subject,
+			Author:     dbArticle.Header.Author,
+			MsgID:      dbArticle.Header.MsgID,
+			References: []string{dbArticle.Header.ParentID},
+		},
+		Body: dbArticle.Body,
+	}
+	return article, nil
+}
+
+func (s *Spool) GetArticleByMsgID(group string, msgID string) (*Article, error) {
+	dbArticle, err := s.db.GetArticleByMsgID(msgID)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching headers for msg ID %s: %w", msgID, err)
 	}
 
 	postedAt, err := store.FromDbTime(dbArticle.Header.PostedAt)

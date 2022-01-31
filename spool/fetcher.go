@@ -83,6 +83,51 @@ func (s *Spool) FetchSubreddit(subreddit string, startDateTime time.Time, pageFe
 	return nil
 }
 
+func fetchComments(
+	ctx context.Context,
+	client *reddit.Client,
+	post *reddit.Post,
+	pChan chan<- *reddit.PostAndComments,
+	limiter chan bool,
+	ticker <-chan time.Time,
+	ignoreTick bool,
+	wg *sync.WaitGroup,
+) {
+	defer wg.Done()
+	defer func() {
+		<-limiter
+	}()
+
+	limiter <- true
+	if !ignoreTick {
+		<-ticker
+	}
+
+	pc, _, err := client.Post.Get(ctx, post.ID)
+	if err != nil {
+		log.Println("Error fetching comments for post ID", post.ID, ":", err)
+		return
+	}
+	for i := 0; i < 900; i++ {
+		if pc.HasMore() {
+			if !ignoreTick {
+				<-ticker
+			}
+
+			_, err := client.Post.LoadMoreComments(ctx, pc)
+			if err != nil {
+				log.Printf("Error fetching more comments: %s\n", err)
+				return
+			}
+		}
+	}
+
+	if pc != nil {
+		log.Println("Fetched", len(pc.Comments), "comments for post ID:", post.ID)
+		pChan <- pc
+	}
+}
+
 func (s *Spool) addPostAndComments(pcChan chan *reddit.PostAndComments, wg *sync.WaitGroup) {
 	prefix, err := s.Prefix()
 	noPrefix := false

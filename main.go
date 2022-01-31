@@ -25,6 +25,7 @@ func main() {
 	}
 
 	initFlag := flag.Bool("init", false, "initialize the database")
+	updateFlag := flag.Int("update", 0, "update spool with contents of last n hours")
 	prefix := flag.String("prefix", "reddit", "prefix used on spool initialization")
 	dbPath := flag.String("db", defaultSpool, "path to sqlite database")
 	configPath := flag.String("conf", defaultConfig, "path to config file")
@@ -59,19 +60,31 @@ func main() {
 		return
 	}
 
-	if *subs {
+	if *subs || (*updateFlag > 0) {
+		if *subs && (*updateFlag > 0) {
+			log.Fatalln("Cannot init and update at the same time")
+		}
+
 		if cfg.PageFetchLimit == 0 {
 			log.Fatalln("PageFetchLimit not set in config, exiting.")
 		}
 
-		log.Println("Populating spool with subs")
-		startDate, err := spool.StartDate()
-		if err != nil {
-			log.Fatalln("Could not fetch start date:", err)
+		var fetchStart time.Time
+		if *subs {
+			log.Println("Populating spool with subs")
+			start, err := spool.StartDate()
+			if err != nil {
+				log.Fatalln("Could not fetch start date:", err)
+			}
+			fetchStart = *start
+		} else {
+			log.Println("Updating spool for last", *updateFlag, "hours")
+			now := time.Now()
+			fetchStart = now.Add(time.Duration(-1**updateFlag) * time.Hour)
 		}
 		for _, sub := range cfg.Subreddits {
 			log.Println("Fetching sub", sub)
-			err = spool.FetchSubreddit(sub, *startDate, cfg.PageFetchLimit, cfg.IgnoreTick)
+			err = spool.FetchSubreddit(sub, fetchStart, cfg.PageFetchLimit, cfg.IgnoreTick)
 			if err != nil {
 				log.Fatalln("Could not fetch sub:", err)
 			}

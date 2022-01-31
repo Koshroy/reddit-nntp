@@ -107,11 +107,16 @@ func (db *DB) Close() error {
 }
 
 func (db *DB) InsertArticleRecord(ar *ArticleRecord) error {
+	exists, err := db.DoesMessageIDExist(ar.MsgID)
+	if err == nil && exists {
+		return nil
+	}
+
 	insertStmt := `
         INSERT INTO spool(posted_at, newsgroup, subject, author, message_id, parent_id, body)
         VALUES (?, ?, ?, ?, ?, ?, ?)
         `
-	_, err := db.db.Exec(
+	_, err = db.db.Exec(
 		insertStmt,
 		ar.PostedAt,
 		ar.Newsgroup,
@@ -236,6 +241,30 @@ func (db *DB) ArticleCount() (uint, error) {
 
 }
 
+func (db *DB) DoesMessageIDExist(msgID string) (bool, error) {
+	stmt, err := db.db.Prepare("SELECT COUNT(*) FROM spool WHERE message_id = ?")
+	if err != nil {
+		return false, fmt.Errorf("error preparing msg id existence query: %w", err)
+	}
+	defer stmt.Close()
+	rows, err := stmt.Query(msgID)
+	if err != nil {
+		return false, fmt.Errorf("error querying for msg id existence: %w", err)
+	}
+	defer rows.Close()
+
+	var count uint
+	for rows.Next() {
+		err = rows.Scan(&count)
+		if err != nil {
+			return false, fmt.Errorf("could not unmarshal db row: %w", err)
+		}
+		break
+	}
+
+	return count > 0, nil
+}
+
 func (db *DB) GroupArticleCount(group string) (int, error) {
 	stmt, err := db.db.Prepare("SELECT COUNT(*) FROM spool WHERE newsgroup = ?")
 	if err != nil {
@@ -336,6 +365,48 @@ func (db *DB) GetHeaderByRowID(rowID RowID) (*Header, error) {
 	return nil, nil
 }
 
+func (db *DB) GetHeaderByMsgID(msgID string) (*Header, error) {
+	raw := `
+        SELECT posted_at, newsgroup, subject, author, message_id, parent_id
+        FROM spool WHERE message_id = ?;
+        `
+	stmt, err := db.db.Prepare(raw)
+	if err != nil {
+		return nil, fmt.Errorf("error preparing header by msgID %d query: %w", msgID, err)
+	}
+	defer stmt.Close()
+	rows, err := stmt.Query(msgID)
+	if err != nil {
+		return nil, fmt.Errorf("error querying for header by msgID %d: %w", msgID, err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var postedAt string
+		var newsgroup string
+		var subject string
+		var author string
+		var msgID string
+		var parentID string
+
+		err = rows.Scan(&postedAt, &newsgroup, &subject, &author, &msgID, &parentID)
+		if err != nil {
+			return nil, fmt.Errorf("could not unmarshal db row: %w", err)
+		}
+
+		return &Header{
+			PostedAt:  postedAt,
+			Newsgroup: newsgroup,
+			Subject:   subject,
+			Author:    author,
+			MsgID:     msgID,
+			ParentID:  parentID,
+		}, nil
+	}
+
+	return nil, nil
+}
+
 func (db *DB) GetArticleByRowID(rowID RowID) (*Article, error) {
 	raw := `
         SELECT posted_at, newsgroup, subject, author, message_id, parent_id, body
@@ -349,6 +420,52 @@ func (db *DB) GetArticleByRowID(rowID RowID) (*Article, error) {
 	rows, err := stmt.Query(rowID)
 	if err != nil {
 		return nil, fmt.Errorf("error querying for article by rowID %d: %w", rowID, err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var postedAt string
+		var newsgroup string
+		var subject string
+		var author string
+		var msgID string
+		var parentID string
+		var body []byte
+
+		err = rows.Scan(&postedAt, &newsgroup, &subject, &author, &msgID, &parentID, &body)
+		if err != nil {
+			return nil, fmt.Errorf("could not unmarshal db row: %w", err)
+		}
+
+		return &Article{
+			Header: Header{
+				PostedAt:  postedAt,
+				Newsgroup: newsgroup,
+				Subject:   subject,
+				Author:    author,
+				MsgID:     msgID,
+				ParentID:  parentID,
+			},
+			Body: body,
+		}, nil
+	}
+
+	return nil, nil
+}
+
+func (db *DB) GetArticleByMsgID(msgID string) (*Article, error) {
+	raw := `
+        SELECT posted_at, newsgroup, subject, author, message_id, parent_id, body
+        FROM spool WHERE message_id = ?;
+        `
+	stmt, err := db.db.Prepare(raw)
+	if err != nil {
+		return nil, fmt.Errorf("error preparing article by msgID %d query: %w", msgID, err)
+	}
+	defer stmt.Close()
+	rows, err := stmt.Query(msgID)
+	if err != nil {
+		return nil, fmt.Errorf("error querying for article by msgID %d: %w", msgID, err)
 	}
 	defer rows.Close()
 
