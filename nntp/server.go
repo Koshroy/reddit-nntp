@@ -153,6 +153,9 @@ func readerLoop(ctx context.Context, conn *textproto.Conn, lineChan chan<- strin
 		if ctx.Err() != nil {
 			return
 		}
+		if line == "" {
+			continue
+		}
 		lineChan <- line
 	}
 }
