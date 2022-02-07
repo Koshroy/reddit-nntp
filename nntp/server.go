@@ -266,7 +266,6 @@ func processLoop(ctx context.Context, conn *textproto.Conn, spool *spool.Spool, 
 					log.Printf("error sending group to client: %v\n", err)
 				}
 			case "NEWGROUPS":
-				log.Println(line)
 				if len(cmd.args) < 2 {
 					err := conn.PrintfLine("403 not enough arguments provided to NEWGROUPS")
 					for _, arg := range cmd.args {
