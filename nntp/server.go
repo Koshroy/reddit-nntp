@@ -555,7 +555,7 @@ func handleNewGroups(conn *textproto.Conn, sp *spool.Spool, rawDate, rawTime str
 
 	datum, err := getGroupData(sp, groups)
 	if err != nil {
-		return conn.PrintfLine("403 error reading from spool")
+		return conn.PrintfLine("500 error reading from spool")
 	}
 
 	w := conn.DotWriter()
