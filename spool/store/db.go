@@ -40,6 +40,12 @@ type Article struct {
 	Body   []byte
 }
 
+type GroupMetadata struct {
+	Name         string
+	DateCreated  time.Time
+	DaysRetained uint
+}
+
 const dbTimeFormat = "2006-01-02 15:04:05Z07:00"
 
 func FromDbTime(s string) (time.Time, error) {
@@ -95,6 +101,18 @@ func (db *DB) CreateNewSpool(startDate time.Time, prefix string) error {
 		return fmt.Errorf("error creating spool table: %w", err)
 	}
 
+	sqlStmtGroups := `
+        CREATE TABLE groups(
+               name TEXT UNIQUE NOT NULL,
+               date_created TEXT NOT NULL,
+               days_retained INTEGER NOT NULL
+        );
+        `
+	_, err = db.db.Exec(sqlStmtGroups)
+	if err != nil {
+		return fmt.Errorf("error creating groups table: %w", err)
+	}
+
 	return nil
 }
 
@@ -107,6 +125,10 @@ func (db *DB) Close() error {
 }
 
 func (db *DB) InsertArticleRecord(ar *ArticleRecord) error {
+	if ar == nil {
+		return errors.New("cannot insert nil record into db")
+	}
+
 	exists, err := db.DoesMessageIDExist(ar.MsgID)
 	if err == nil && exists {
 		return nil
@@ -192,7 +214,7 @@ func (db *DB) GetPrefix() (string, error) {
 }
 
 func (db *DB) FetchNewsgroups() ([]string, error) {
-	stmt, err := db.db.Prepare("SELECT DISTINCT newsgroup FROM spool")
+	stmt, err := db.db.Prepare("SELECT name FROM groups")
 	if err != nil {
 		return nil, fmt.Errorf("error preparing newsgroup list query: %w", err)
 	}
@@ -497,4 +519,83 @@ func (db *DB) GetArticleByMsgID(msgID string) (*Article, error) {
 	}
 
 	return nil, nil
+}
+
+func (db *DB) FetchNewGroups(dt time.Time) ([]string, error) {
+	stmt, err := db.db.Prepare("SELECT name FROM groups WHERE date_created > ?")
+	if err != nil {
+		return nil, fmt.Errorf("error preparing new groups query: %w", err)
+	}
+	defer stmt.Close()
+	fmtTime := dt.Format(time.RFC3339)
+	rows, err := stmt.Query(fmtTime)
+	if err != nil {
+		return nil, fmt.Errorf("error querying for new groups: %w", err)
+	}
+	defer rows.Close()
+
+	var groups []string
+	for rows.Next() {
+		var group string
+		err = rows.Scan(&group)
+		if err != nil {
+			return groups, fmt.Errorf("could not unmarshal db row: %w", err)
+		}
+		groups = append(groups, group)
+	}
+
+	return groups, nil
+}
+
+func (db *DB) DoesGroupMetadataExist(gm *GroupMetadata) (bool, error) {
+	stmt, err := db.db.Prepare("SELECT COUNT(*) FROM groups WHERE name = ?")
+	if err != nil {
+		return false, fmt.Errorf("error preparing group metadata existance query: %w", err)
+	}
+	defer stmt.Close()
+	rows, err := stmt.Query(gm.Name)
+	if err != nil {
+		return false, fmt.Errorf("error querying for group metadata existence: %w", err)
+	}
+	defer rows.Close()
+
+	var count uint
+	for rows.Next() {
+		err = rows.Scan(&count)
+		if err != nil {
+			return false, fmt.Errorf("could not unmarshal db row: %w", err)
+		}
+		break
+	}
+
+	return count > 0, nil
+}
+
+func (db *DB) InsertGroupMetadata(gm *GroupMetadata) error {
+	if gm == nil {
+		return errors.New("cannot insert nil group metadata")
+	}
+
+	exists, err := db.DoesGroupMetadataExist(gm)
+	if err == nil && exists {
+		return nil
+	}
+
+	dateCreatedUTC := gm.DateCreated.In(time.UTC).Format(time.RFC3339)
+	insertStmt := `
+        INSERT INTO groups(name, date_created, days_retained)
+        VALUES (?, ?, ?)
+        `
+	_, err = db.db.Exec(
+		insertStmt,
+		gm.Name,
+		dateCreatedUTC,
+		gm.DaysRetained,
+	)
+
+	if err != nil {
+		return fmt.Errorf("error inserting article into db: %w", err)
+	}
+
+	return nil
 }

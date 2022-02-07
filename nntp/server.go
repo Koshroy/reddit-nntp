@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Koshroy/reddit-nntp/spool"
 )
@@ -16,6 +17,8 @@ import (
 const (
 	GROUP_KEY = iota
 )
+
+const CMD_WORD_LIMIT = 2048
 
 type Server struct {
 	conn   *textproto.Conn
@@ -262,6 +265,23 @@ func processLoop(ctx context.Context, conn *textproto.Conn, spool *spool.Spool, 
 				if err := printMode(conn, cmd.args); err != nil {
 					log.Printf("error sending group to client: %v\n", err)
 				}
+			case "NEWGROUPS":
+				log.Println(line)
+				if len(cmd.args) < 2 {
+					err := conn.PrintfLine("403 not enough arguments provided to NEWGROUPS")
+					for _, arg := range cmd.args {
+						log.Println("args found:", arg)
+					}
+					if err != nil {
+						log.Printf("error sending error response to client: %v\n", err)
+					}
+					continue
+				}
+
+				err := handleNewGroups(conn, spool, cmd.args[0], cmd.args[1])
+				if err != nil {
+					log.Println("error sending error response to client:", err)
+				}
 			default:
 				log.Printf("Unknown command found: %s\n", cmd.cmd)
 				if err := printUnknown(conn); err != nil {
@@ -276,7 +296,7 @@ func processLoop(ctx context.Context, conn *textproto.Conn, spool *spool.Spool, 
 }
 
 func parseLine(line string) (*nntpCmd, error) {
-	splits := strings.SplitN(line, " ", 2)
+	splits := strings.SplitN(line, " ", CMD_WORD_LIMIT)
 	if len(splits) == 0 {
 		return nil, fmt.Errorf("unable to split line received on connection")
 	}
@@ -503,6 +523,59 @@ func printArticle(conn *textproto.Conn, sp *spool.Spool, group string, args []st
 	_, err = buf.WriteTo(w)
 	if err != nil {
 		return fmt.Errorf("error writing article response: %w", err)
+	}
+
+	return w.Close()
+}
+
+func handleNewGroups(conn *textproto.Conn, sp *spool.Spool, rawDate, rawTime string) error {
+	dateTime := rawDate + rawTime
+
+	var groupTime time.Time
+	var err error
+
+	if len(rawDate) == 8 {
+		groupTime, err = time.Parse("20060102150405", dateTime)
+		if err != nil {
+			return conn.PrintfLine("403 error parsing date format")
+		}
+	} else if len(rawDate) == 6 {
+		groupTime, err = time.Parse("060102150405", dateTime)
+		if err != nil {
+			return conn.PrintfLine("403 error parsing date format")
+		}
+	} else {
+		return conn.PrintfLine("403 error parsing date format")
+	}
+
+	groups, err := sp.NewGroups(groupTime)
+	if err != nil {
+		return conn.PrintfLine("500 query to spool failed")
+	}
+
+	datum, err := getGroupData(sp, groups)
+	if err != nil {
+		return conn.PrintfLine("403 error reading from spool")
+	}
+
+	w := conn.DotWriter()
+	_, err = w.Write([]byte("231 list of newsgroups follows\n"))
+	if err != nil {
+		w.Close()
+		return fmt.Errorf("error returning newgroups status line: %w", err)
+	}
+
+	for _, data := range datum {
+		_, err = w.Write([]byte(data.String(false)))
+		if err != nil {
+			w.Close()
+			return fmt.Errorf("error writing group response line to socket: %w", err)
+		}
+		_, err = w.Write([]byte("\n"))
+		if err != nil {
+			w.Close()
+			return fmt.Errorf("error writing group response line to socket: %w", err)
+		}
 	}
 
 	return w.Close()

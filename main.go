@@ -88,6 +88,10 @@ func main() {
 			if err != nil {
 				log.Fatalln("Could not fetch sub:", err)
 			}
+			err = spool.AddGroupMetadata(sub, time.Now(), 30)
+			if err != nil {
+				log.Fatalln("Could not add group metadata for sub", sub, ":", err)
+			}
 			log.Println("Finished populating subreddit", sub)
 		}
 		log.Println("Finished populating spool")

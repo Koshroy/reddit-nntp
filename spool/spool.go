@@ -336,3 +336,26 @@ func (s *Spool) GetArticleByMsgID(group string, msgID string) (*Article, error) 
 	}
 	return article, nil
 }
+
+func (s *Spool) NewGroups(dt time.Time) ([]string, error) {
+	var empty []string
+	groups, err := s.db.FetchNewGroups(dt)
+	if err != nil {
+		return empty, fmt.Errorf("error getting new groups from spool: %w", err)
+	}
+
+	return groups, nil
+}
+
+func (s *Spool) AddGroupMetadata(name string, dateCreated time.Time, daysRetained uint) error {
+	err := s.db.InsertGroupMetadata(&store.GroupMetadata{
+		Name:         fmt.Sprintf("%s.%s", s.prefix, strings.ToLower(name)),
+		DateCreated:  dateCreated,
+		DaysRetained: daysRetained,
+	})
+	if err != nil {
+		return fmt.Errorf("error adding group %s metadata: %w", name, err)
+	}
+
+	return nil
+}
