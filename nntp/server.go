@@ -79,7 +79,7 @@ func (s Server) Close() {
 	log.Println("Closing connection")
 	err := s.conn.Close()
 	if err != nil {
-		log.Println("error closing connection: %v\n", err)
+		log.Println("error closing connection:", err)
 	}
 }
 

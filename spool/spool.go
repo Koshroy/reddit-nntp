@@ -45,7 +45,7 @@ func (h Header) Bytes() bytes.Buffer {
 	buf.WriteString(h.Newsgroup)
 	buf.WriteRune('\n')
 	buf.WriteString("Subject: ")
-	buf.WriteString(h.Subject)
+	buf.WriteString(unQuoteHTMLString(h.Subject))
 	buf.WriteRune('\n')
 	buf.WriteString("Date: ")
 	buf.WriteString(h.PostedAt.Format(nntpTimeFormat))
@@ -78,14 +78,19 @@ func (a Article) Bytes() bytes.Buffer {
 	hdrBytes := a.Header.Bytes()
 	buf.ReadFrom(&hdrBytes)
 	buf.WriteRune('\n')
-	buf.Write(unQuoteArticle(a.Body))
+	buf.Write(unQuoteHTML(a.Body))
 
 	return buf
 }
 
-func unQuoteArticle(body []byte) []byte {
+func unQuoteHTML(body []byte) []byte {
 	bodyStr := strings.ReplaceAll(string(body), "&#x200B;", "")
 	return []byte(html.UnescapeString(bodyStr))
+}
+
+func unQuoteHTMLString(payload string) string {
+	bodyStr := strings.ReplaceAll(payload, "&#x200B;", "")
+	return html.UnescapeString(bodyStr)
 }
 
 func New(fname string, concLimit uint, creds *reddit.Credentials) (*Spool, error) {

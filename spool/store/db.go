@@ -394,12 +394,12 @@ func (db *DB) GetHeaderByMsgID(msgID string) (*Header, error) {
         `
 	stmt, err := db.db.Prepare(raw)
 	if err != nil {
-		return nil, fmt.Errorf("error preparing header by msgID %d query: %w", msgID, err)
+		return nil, fmt.Errorf("error preparing header by msgID %s query: %w", msgID, err)
 	}
 	defer stmt.Close()
 	rows, err := stmt.Query(msgID)
 	if err != nil {
-		return nil, fmt.Errorf("error querying for header by msgID %d: %w", msgID, err)
+		return nil, fmt.Errorf("error querying for header by msgID %s: %w", msgID, err)
 	}
 	defer rows.Close()
 
@@ -482,12 +482,12 @@ func (db *DB) GetArticleByMsgID(msgID string) (*Article, error) {
         `
 	stmt, err := db.db.Prepare(raw)
 	if err != nil {
-		return nil, fmt.Errorf("error preparing article by msgID %d query: %w", msgID, err)
+		return nil, fmt.Errorf("error preparing article by msgID %s query: %w", msgID, err)
 	}
 	defer stmt.Close()
 	rows, err := stmt.Query(msgID)
 	if err != nil {
-		return nil, fmt.Errorf("error querying for article by msgID %d: %w", msgID, err)
+		return nil, fmt.Errorf("error querying for article by msgID %s: %w", msgID, err)
 	}
 	defer rows.Close()
 
