@@ -471,10 +471,12 @@ func printHead(conn *textproto.Conn, sp *spool.Spool, group string, args []strin
 	buf := header.Bytes()
 	_, err = w.Write([]byte(fmt.Sprintf("221 %d %s\n", articleNum, header.MsgID)))
 	if err != nil {
+		w.Close()
 		return fmt.Errorf("error writing header response header: %w", err)
 	}
 	_, err = buf.WriteTo(w)
 	if err != nil {
+		w.Close()
 		return fmt.Errorf("error writing header response: %w", err)
 	}
 
