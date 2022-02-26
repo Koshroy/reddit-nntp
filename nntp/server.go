@@ -49,8 +49,8 @@ const (
 )
 
 type articleRange struct {
-	low   int
-	high  int
+	low   uint
+	high  uint
 	class rangeClass
 	valid bool
 }
@@ -295,10 +295,19 @@ func processLoop(ctx context.Context, conn *textproto.Conn, spool *spool.Spool, 
 					log.Println("error sending error response to client:", err)
 				}
 			case "LISTGROUP":
+				var group string
+				var explicitGroup bool
 				if len(cmd.args) < 1 {
-					err := conn.PrintfLine("403 not enough arguments provided to LISTGROUP")
+					group = curGroup(locals)
+				} else {
+					group = cmd.args[0]
+					explicitGroup = true
+				}
+
+				if group == "" {
+					err := conn.PrintfLine("412 No Newsgroup Selected")
 					if err != nil {
-						log.Printf("error sending error response to client: %v\n", err)
+						log.Println("error sending LISTGROUP error to client:", err)
 					}
 					continue
 				}
@@ -316,12 +325,14 @@ func processLoop(ctx context.Context, conn *textproto.Conn, spool *spool.Spool, 
 					}
 				}
 
-				err = handleListGroups(conn, spool, cmd.args[0], aRange)
+				err = handleListGroups(conn, spool, group, aRange)
 				if err != nil {
 					log.Println("error sending LISTGROUP response:", err)
 				} else {
-					// set the current group to this group if articles are returned
-					setCurGroup(locals, cmd.args[0])
+					// set the current group to this group if a group was specified and articles are returned
+					if explicitGroup {
+						setCurGroup(locals, group)
+					}
 				}
 			default:
 				log.Printf("Unknown command found: %s\n", cmd.cmd)
@@ -650,9 +661,9 @@ func parseArticleRange(rawRange string) (articleRange, error) {
 			}
 		}
 
-		aRange.low = low
+		aRange.low = uint(low)
 		if closedRange {
-			aRange.high = high
+			aRange.high = uint(high)
 			aRange.class = CLOSED_RANGE
 		} else {
 			aRange.class = HALF_OPEN_RANGE
@@ -666,7 +677,7 @@ func parseArticleRange(rawRange string) (articleRange, error) {
 			return aRange, fmt.Errorf("could not parse singleton article range: %w", err)
 		}
 
-		aRange.low = num
+		aRange.low = uint(num)
 		aRange.class = SINGLETON_RANGE
 		aRange.valid = true
 
@@ -679,10 +690,6 @@ func handleListGroups(conn *textproto.Conn, sp *spool.Spool, group string, rng a
 		return conn.PrintfLine("412 No newsgroup selected")
 	}
 
-	if rng.valid {
-		return conn.PrintfLine("500 article range mode not supported")
-	}
-
 	aNums, err := sp.GetArticleNumsFromGroup(group)
 	if err != nil {
 		return conn.PrintfLine("500 query to spool failed")
@@ -692,21 +699,39 @@ func handleListGroups(conn *textproto.Conn, sp *spool.Spool, group string, rng a
 		return conn.PrintfLine("411 group not found")
 	}
 
-	max := aNums[0]
-	for _, num := range aNums {
-		if num > max {
-			max = num
+	var newNums []uint
+	if rng.valid {
+		newNums = make([]uint, 0)
+		for _, aNum := range aNums {
+			if rng.class == CLOSED_RANGE {
+				if aNum >= rng.low && aNum <= rng.high {
+					newNums = append(newNums, aNum)
+				}
+			} else if rng.class == HALF_OPEN_RANGE {
+				if aNum >= rng.low {
+					newNums = append(newNums, aNum)
+				}
+			} else {
+				if aNum == rng.low {
+					newNums = append(newNums, aNum)
+				}
+			}
 		}
+	} else {
+		newNums = make([]uint, len(aNums))
+		copy(newNums, aNums)
 	}
 
-	min := aNums[0]
-	for _, num := range aNums {
-		if num < max {
-			min = num
-		}
+	var min, max, span uint
+	if len(newNums) == 0 {
+		min = 1
+		max = 0
+		span = 1
+	} else {
+		min = newNums[0]
+		max = newNums[len(newNums)-1]
+		span = max - min + 1
 	}
-
-	span := max - min
 
 	w := conn.DotWriter()
 	_, err = w.Write([]byte(fmt.Sprintf("211 %d %d %d list follows\n", span, min, max)))
@@ -715,7 +740,7 @@ func handleListGroups(conn *textproto.Conn, sp *spool.Spool, group string, rng a
 		return fmt.Errorf("error returning newgroups status line: %w", err)
 	}
 
-	for _, num := range aNums {
+	for _, num := range newNums {
 		_, err = w.Write([]byte(fmt.Sprintf("%d", num)))
 		if err != nil {
 			w.Close()

@@ -376,8 +376,8 @@ func (s *Spool) GetArticleNumsFromGroup(group string) ([]uint, error) {
 	}
 
 	nums := make([]uint, len(rowIDs))
-	for _, rid := range rowIDs {
-		nums = append(nums, uint(rid))
+	for i, _ := range rowIDs {
+		nums = append(nums, uint(i))
 	}
 
 	return nums, nil
