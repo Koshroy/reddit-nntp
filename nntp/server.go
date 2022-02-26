@@ -2,6 +2,7 @@ package nntp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -37,6 +38,21 @@ type groupData struct {
 	high   int
 	low    int
 	status groupStatus
+}
+
+type rangeClass uint
+
+const (
+	CLOSED_RANGE = iota
+	HALF_OPEN_RANGE
+	SINGLETON_RANGE
+)
+
+type articleRange struct {
+	low   int
+	high  int
+	class rangeClass
+	valid bool
 }
 
 const POST_LINE = "201 Posting prohibited"
@@ -148,7 +164,8 @@ func readerLoop(ctx context.Context, conn *textproto.Conn, lineChan chan<- strin
 	for {
 		line, err := conn.ReadLine()
 		if err != nil {
-			if err != io.EOF && ctx.Err() != nil {
+			ctxErr := ctx.Err()
+			if err != io.EOF && ctxErr != nil && ctxErr != context.Canceled {
 				log.Printf("error reading line from connection: %v\n", err)
 			}
 			return
@@ -188,7 +205,6 @@ func processLoop(ctx context.Context, conn *textproto.Conn, spool *spool.Spool, 
 			case "CAPABILITIES":
 				if err := printCapabilities(conn); err != nil {
 					log.Printf("error sending capabilities to client: %v\n", err)
-					return
 				}
 			case "QUIT":
 				if err := printQuit(conn); err != nil && ctx.Err() == nil {
@@ -268,9 +284,6 @@ func processLoop(ctx context.Context, conn *textproto.Conn, spool *spool.Spool, 
 			case "NEWGROUPS":
 				if len(cmd.args) < 2 {
 					err := conn.PrintfLine("403 not enough arguments provided to NEWGROUPS")
-					for _, arg := range cmd.args {
-						log.Println("args found:", arg)
-					}
 					if err != nil {
 						log.Printf("error sending error response to client: %v\n", err)
 					}
@@ -280,6 +293,35 @@ func processLoop(ctx context.Context, conn *textproto.Conn, spool *spool.Spool, 
 				err := handleNewGroups(conn, spool, cmd.args[0], cmd.args[1])
 				if err != nil {
 					log.Println("error sending error response to client:", err)
+				}
+			case "LISTGROUP":
+				if len(cmd.args) < 1 {
+					err := conn.PrintfLine("403 not enough arguments provided to LISTGROUP")
+					if err != nil {
+						log.Printf("error sending error response to client: %v\n", err)
+					}
+					continue
+				}
+
+				var aRange articleRange
+				var err error
+				if len(cmd.args) >= 2 {
+					aRange, err = parseArticleRange(cmd.args[1])
+					if err != nil {
+						err := conn.PrintfLine("403 could not parse article range: %v", err)
+						if err != nil {
+							log.Println("error sending error response to client:", err)
+							continue
+						}
+					}
+				}
+
+				err = handleListGroups(conn, spool, cmd.args[0], aRange)
+				if err != nil {
+					log.Println("error sending LISTGROUP response:", err)
+				} else {
+					// set the current group to this group if articles are returned
+					setCurGroup(locals, cmd.args[0])
 				}
 			default:
 				log.Printf("Unknown command found: %s\n", cmd.cmd)
@@ -519,10 +561,12 @@ func printArticle(conn *textproto.Conn, sp *spool.Spool, group string, args []st
 	buf := article.Bytes()
 	_, err = w.Write([]byte(fmt.Sprintf("220 %d %s\n", articleNum, article.Header.MsgID)))
 	if err != nil {
+		w.Close()
 		return fmt.Errorf("error writing article response header: %w", err)
 	}
 	_, err = buf.WriteTo(w)
 	if err != nil {
+		w.Close()
 		return fmt.Errorf("error writing article response: %w", err)
 	}
 
@@ -576,6 +620,111 @@ func handleNewGroups(conn *textproto.Conn, sp *spool.Spool, rawDate, rawTime str
 		if err != nil {
 			w.Close()
 			return fmt.Errorf("error writing group response line to socket: %w", err)
+		}
+	}
+
+	return w.Close()
+}
+
+func parseArticleRange(rawRange string) (articleRange, error) {
+	var aRange articleRange
+
+	if strings.ContainsRune(rawRange, '-') {
+		splits := strings.SplitN(rawRange, "-", 2)
+		if len(splits) == 0 {
+			return aRange, errors.New("could not parse article range: invalid split")
+		}
+
+		low, err := strconv.Atoi(splits[0])
+		if err != nil {
+			return aRange, fmt.Errorf("could not parse lower bound of article range: %w", err)
+		}
+
+		var high int
+		var closedRange bool
+		if len(splits) == 2 {
+			closedRange = true
+			high, err = strconv.Atoi(splits[1])
+			if err != nil {
+				return aRange, fmt.Errorf("could not parse upper bound of closed article range: %w", err)
+			}
+		}
+
+		aRange.low = low
+		if closedRange {
+			aRange.high = high
+			aRange.class = CLOSED_RANGE
+		} else {
+			aRange.class = HALF_OPEN_RANGE
+		}
+		aRange.valid = true
+
+		return aRange, nil
+	} else {
+		num, err := strconv.Atoi(rawRange)
+		if err != nil {
+			return aRange, fmt.Errorf("could not parse singleton article range: %w", err)
+		}
+
+		aRange.low = num
+		aRange.class = SINGLETON_RANGE
+		aRange.valid = true
+
+		return aRange, nil
+	}
+}
+
+func handleListGroups(conn *textproto.Conn, sp *spool.Spool, group string, rng articleRange) error {
+	if len(group) < 1 {
+		return conn.PrintfLine("412 No newsgroup selected")
+	}
+
+	if rng.valid {
+		return conn.PrintfLine("500 article range mode not supported")
+	}
+
+	aNums, err := sp.GetArticleNumsFromGroup(group)
+	if err != nil {
+		return conn.PrintfLine("500 query to spool failed")
+	}
+
+	if len(aNums) == 0 {
+		return conn.PrintfLine("411 group not found")
+	}
+
+	max := aNums[0]
+	for _, num := range aNums {
+		if num > max {
+			max = num
+		}
+	}
+
+	min := aNums[0]
+	for _, num := range aNums {
+		if num < max {
+			min = num
+		}
+	}
+
+	span := max - min
+
+	w := conn.DotWriter()
+	_, err = w.Write([]byte(fmt.Sprintf("211 %d %d %d list follows\n", span, min, max)))
+	if err != nil {
+		w.Close()
+		return fmt.Errorf("error returning newgroups status line: %w", err)
+	}
+
+	for _, num := range aNums {
+		_, err = w.Write([]byte(fmt.Sprintf("%d", num)))
+		if err != nil {
+			w.Close()
+			return fmt.Errorf("error writing article number line to socket: %w", err)
+		}
+		_, err = w.Write([]byte("\n"))
+		if err != nil {
+			w.Close()
+			return fmt.Errorf("error writing article number line to socket: %w", err)
 		}
 	}
 

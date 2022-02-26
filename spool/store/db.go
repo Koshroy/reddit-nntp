@@ -599,3 +599,33 @@ func (db *DB) InsertGroupMetadata(gm *GroupMetadata) error {
 
 	return nil
 }
+
+func (db *DB) GetAllRowIDs(group string) ([]RowID, error) {
+	rowIDs := make([]RowID, 0)
+	raw := `
+        SELECT rowid
+        FROM spool WHERE newsgroup = ? ORDER BY posted_at;
+        `
+	stmt, err := db.db.Prepare(raw)
+	if err != nil {
+		return rowIDs, fmt.Errorf("error preparing rowID query for group %s: %w", group, err)
+	}
+	defer stmt.Close()
+	rows, err := stmt.Query(group)
+	if err != nil {
+		return rowIDs, fmt.Errorf("error querying for rowIDs for group %s: %w", group, err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var rowID RowID
+		err = rows.Scan(&rowID)
+		if err != nil {
+			return rowIDs, fmt.Errorf("could not unmarshal db row: %w", err)
+		}
+
+		rowIDs = append(rowIDs, rowID)
+	}
+
+	return rowIDs, nil
+}

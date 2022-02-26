@@ -364,3 +364,21 @@ func (s *Spool) AddGroupMetadata(name string, dateCreated time.Time, daysRetaine
 
 	return nil
 }
+
+func (s *Spool) GetArticleNumsFromGroup(group string) ([]uint, error) {
+	rowIDs, err := s.db.GetAllRowIDs(group)
+	if err != nil {
+		return nil, fmt.Errorf("error getting row IDs: %w", err)
+	}
+
+	if len(rowIDs) == 0 {
+		return nil, fmt.Errorf("no headers found for group %s", group)
+	}
+
+	nums := make([]uint, len(rowIDs))
+	for _, rid := range rowIDs {
+		nums = append(nums, uint(rid))
+	}
+
+	return nums, nil
+}
