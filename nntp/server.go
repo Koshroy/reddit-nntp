@@ -311,8 +311,8 @@ func processLoop(ctx context.Context, conn *textproto.Conn, spool *spool.Spool, 
 						err := conn.PrintfLine("403 could not parse article range: %v", err)
 						if err != nil {
 							log.Println("error sending error response to client:", err)
-							continue
 						}
+						continue
 					}
 				}
 
@@ -642,7 +642,7 @@ func parseArticleRange(rawRange string) (articleRange, error) {
 
 		var high int
 		var closedRange bool
-		if len(splits) == 2 {
+		if len(splits) == 2 && len(splits[1]) > 0 {
 			closedRange = true
 			high, err = strconv.Atoi(splits[1])
 			if err != nil {
