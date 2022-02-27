@@ -259,7 +259,7 @@ func (s *Spool) GetHeaderByNGNum(group string, articleNum uint) (*Header, error)
 	return header, nil
 }
 
-func (s *Spool) GetHeaderByMsgID(group string, msgID string) (*Header, error) {
+func (s *Spool) GetHeaderByMsgID(msgID string) (*Header, error) {
 	dbHeader, err := s.db.GetHeaderByMsgID(msgID)
 	if err != nil {
 		return nil, fmt.Errorf("error fetching headers for msg ID %s: %w", msgID, err)

@@ -17,6 +17,7 @@ import (
 
 const (
 	GROUP_KEY = iota
+	ARTICLE_KEY
 )
 
 const CMD_WORD_LIMIT = 2048
@@ -113,6 +114,34 @@ func curGroup(locals *sync.Map) string {
 
 func setCurGroup(locals *sync.Map, group string) {
 	locals.Store(GROUP_KEY, group)
+}
+
+func curArticleNum(locals *sync.Map) uint {
+	v, ok := locals.Load(ARTICLE_KEY)
+	if !ok {
+		return 0
+	}
+	aNum, ok := v.(uint)
+	if !ok {
+		return 0
+	}
+	return aNum
+}
+
+func setCurArticleNum(locals *sync.Map, aNum uint) {
+	locals.Store(ARTICLE_KEY, aNum)
+}
+
+func isMessageID(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+
+	if s[0] == '<' && s[len(s)-1] == '>' {
+		return true
+	}
+
+	return false
 }
 
 func (s Server) Process(ctx context.Context) {
@@ -334,6 +363,12 @@ func processLoop(ctx context.Context, conn *textproto.Conn, spool *spool.Spool, 
 						setCurGroup(locals, group)
 					}
 				}
+			case "STAT":
+				group := curGroup(locals)
+				aNum := curArticleNum(locals)
+				if err := handleStat(conn, spool, group, aNum, cmd.args); err != nil {
+					log.Println("error sending group to client:", err)
+				}
 			default:
 				log.Printf("Unknown command found: %s\n", cmd.cmd)
 				if err := printUnknown(conn); err != nil {
@@ -503,9 +538,9 @@ func printHead(conn *textproto.Conn, sp *spool.Spool, group string, args []strin
 	var header *spool.Header
 	var err error
 	var articleNum int
-	if arg[0] == '<' && arg[len(arg)-1] == '>' {
+	if isMessageID(arg) {
 		// Message-ID mode
-		header, err = sp.GetHeaderByMsgID(group, arg)
+		header, err = sp.GetHeaderByMsgID(arg)
 		articleNum = 0
 	} else {
 		articleNum, err = strconv.Atoi(arg)
@@ -551,7 +586,7 @@ func printArticle(conn *textproto.Conn, sp *spool.Spool, group string, args []st
 	var article *spool.Article
 	var err error
 	var articleNum int
-	if arg[0] == '<' && arg[len(arg)-1] == '>' {
+	if isMessageID(arg) {
 		// Message-ID mode
 		article, err = sp.GetArticleByMsgID(group, arg)
 		articleNum = 0
@@ -754,4 +789,76 @@ func handleListGroups(conn *textproto.Conn, sp *spool.Spool, group string, rng a
 	}
 
 	return w.Close()
+}
+
+func handleStat(conn *textproto.Conn, sp *spool.Spool, group string, aNum uint, args []string) error {
+	const (
+		IMPLICIT_STAT = iota
+		EXPLICIT_ANUM
+		EXPLICIT_MSGID
+	)
+
+	queryType := IMPLICIT_STAT
+	if len(args) == 0 {
+		queryType = IMPLICIT_STAT
+	} else if isMessageID(args[0]) {
+		queryType = EXPLICIT_MSGID
+	} else {
+		queryType = EXPLICIT_ANUM
+	}
+
+	if (queryType == IMPLICIT_STAT || queryType == EXPLICIT_ANUM) && group == "" {
+		err := conn.PrintfLine("412 No Newsgroup Selected")
+		if err != nil {
+			return fmt.Errorf("error returning stat response: %w", err)
+		}
+	}
+
+	if queryType == EXPLICIT_MSGID {
+		header, err := sp.GetHeaderByMsgID(args[0])
+		if err != nil {
+			err := conn.PrintfLine("423 No article with that number")
+			if err != nil {
+				return fmt.Errorf("error returning stat response: %w", err)
+			}
+
+			return nil
+		}
+		// TODO: return the correct article number here
+		err = conn.PrintfLine(fmt.Sprintf("223 0 %s", header.MsgID))
+		if err != nil {
+			return fmt.Errorf("error returning stat response: %w", err)
+		}
+		return nil
+	} else {
+		if queryType == EXPLICIT_ANUM {
+			num, err := strconv.Atoi(args[0])
+			if err != nil {
+				err = conn.PrintfLine("423 No article with that number")
+				if err != nil {
+					return fmt.Errorf("error returning stat response: %w", err)
+				}
+				return nil
+			}
+
+			aNum = uint(num)
+		}
+
+		header, err := sp.GetHeaderByNGNum(group, aNum)
+		if err != nil {
+			err := conn.PrintfLine("423 No article with that number")
+			if err != nil {
+				return fmt.Errorf("error returning stat response: %w", err)
+			}
+
+			return nil
+		}
+
+		err = conn.PrintfLine(fmt.Sprintf("223 %d %s", aNum, header.MsgID))
+		if err != nil {
+			return fmt.Errorf("error returning stat response: %w", err)
+		}
+		return nil
+
+	}
 }
