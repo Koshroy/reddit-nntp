@@ -311,22 +311,18 @@ func (db *DB) GroupArticleCount(group string) (int, error) {
 	return 0, nil
 }
 
-func (db *DB) GetRowIDs(group string, count uint) ([]RowID, error) {
-	if count == 0 {
-		return nil, errors.New("error: cannot request 0 rowids")
-	}
-
-	rowIDs := make([]RowID, count)
+func (db *DB) GetRowIDs(group string) ([]RowID, error) {
+	rowIDs := make([]RowID, 0)
 	raw := `
         SELECT rowid
-        FROM spool WHERE newsgroup = ? ORDER BY posted_at LIMIT ?;
+        FROM spool WHERE newsgroup = ? ORDER BY posted_at;
         `
 	stmt, err := db.db.Prepare(raw)
 	if err != nil {
 		return rowIDs, fmt.Errorf("error preparing rowID query for group %s: %w", group, err)
 	}
 	defer stmt.Close()
-	rows, err := stmt.Query(group, count)
+	rows, err := stmt.Query(group)
 	if err != nil {
 		return rowIDs, fmt.Errorf("error querying for rowIDs for group %s: %w", group, err)
 	}

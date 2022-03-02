@@ -2,9 +2,11 @@ package spool
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"html"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/vartanbeno/go-reddit/v2/reddit"
@@ -19,6 +21,7 @@ type Spool struct {
 	timeFetched bool
 	prefix      string
 	concLimit   uint
+	rowIDCache  *sync.Map
 }
 
 type Credentials = reddit.Credentials
@@ -113,6 +116,8 @@ func New(fname string, concLimit uint, creds *reddit.Credentials) (*Spool, error
 		}
 	}
 
+	var rowIDCache sync.Map
+
 	now := time.Now()
 	return &Spool{
 		db:          db,
@@ -121,6 +126,7 @@ func New(fname string, concLimit uint, creds *reddit.Credentials) (*Spool, error
 		timeFetched: false,
 		concLimit:   concLimit,
 		prefix:      "",
+		rowIDCache:  &rowIDCache,
 	}, nil
 }
 
@@ -226,22 +232,20 @@ func (s *Spool) GroupArticleCount(group string) (int, error) {
 }
 
 func (s *Spool) GetHeaderByNGNum(group string, articleNum uint) (*Header, error) {
-	rowIDs, err := s.db.GetRowIDs(group, articleNum)
+	rowID, err := s.ArticleNumToRowIDCached(group, articleNum)
 	if err != nil {
-		return nil, fmt.Errorf("error getting row ID for header request: %w", err)
-	}
+		if errors.Is(err, ErrArticleNumNotFound) {
+			return nil, nil
+		}
 
-	if len(rowIDs) == 0 {
-		return nil, fmt.Errorf("no headers found for group %s", group)
+		return nil, fmt.Errorf("article number not found: %w", err)
 	}
-
-	last := rowIDs[len(rowIDs)-1]
-	dbHeader, err := s.db.GetHeaderByRowID(last)
+	dbHeader, err := s.db.GetHeaderByRowID(rowID)
 	if dbHeader == nil {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("error fetching headers for row ID %d: %w", last, err)
+		return nil, fmt.Errorf("error fetching headers for row ID %d: %w", rowID, err)
 	}
 
 	postedAt, err := store.FromDbTime(dbHeader.PostedAt)
@@ -281,23 +285,22 @@ func (s *Spool) GetHeaderByMsgID(msgID string) (*Header, error) {
 }
 
 func (s *Spool) GetArticleByNGNum(group string, articleNum uint) (*Article, error) {
-	rowIDs, err := s.db.GetRowIDs(group, articleNum)
+	rowID, err := s.ArticleNumToRowIDCached(group, articleNum)
 	if err != nil {
-		return nil, fmt.Errorf("error getting row ID for header request: %w", err)
+		if errors.Is(err, ErrArticleNumNotFound) {
+			return nil, nil
+		}
+
+		return nil, fmt.Errorf("article number not found: %w", err)
 	}
 
-	if len(rowIDs) == 0 {
-		return nil, fmt.Errorf("no headers found for group %s", group)
-	}
-
-	last := rowIDs[len(rowIDs)-1]
-	dbArticle, err := s.db.GetArticleByRowID(last)
+	dbArticle, err := s.db.GetArticleByRowID(rowID)
 	if dbArticle == nil {
 		return nil, nil
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("error fetching headers for row ID %d: %w", last, err)
+		return nil, fmt.Errorf("error fetching headers for row ID %d: %w", rowID, err)
 	}
 
 	postedAt, err := store.FromDbTime(dbArticle.Header.PostedAt)
