@@ -16,17 +16,19 @@ type cacheEntry struct {
 }
 
 func (s *Spool) GetRowIDsFromCache(group string) ([]store.RowID, error) {
-	cacheMiss := false
+	cacheHit := true
 	v, ok := s.rowIDCache.Load(group)
 	var entry cacheEntry
 	if ok {
 		entry, ok = v.(cacheEntry)
-		cacheMiss = !ok || time.Since(entry.lastFetched) > ROWID_TTL || entry.rowIDs == nil
+		cacheHit = ok && time.Since(entry.lastFetched) <= ROWID_TTL && entry.rowIDs != nil
 	} else {
-		cacheMiss = true
+		cacheHit = false
 	}
 
-	if cacheMiss {
+	if cacheHit {
+		return entry.rowIDs, nil
+	} else {
 		fetchTime := time.Now()
 		rowIDs, err := s.db.GetRowIDs(group)
 		if err != nil {
@@ -56,10 +58,7 @@ func (s *Spool) GetRowIDsFromCache(group string) ([]store.RowID, error) {
 		}
 
 		return rowIDs, nil
-	} else {
-		return entry.rowIDs, nil
 	}
-
 }
 
 var ErrArticleNumNotFound = errors.New("article not found")
