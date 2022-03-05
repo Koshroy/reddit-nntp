@@ -241,7 +241,7 @@ func processLoop(ctx context.Context, conn *textproto.Conn, spool *spool.Spool, 
 				}
 				return
 			case "LIST":
-				if err := printList(conn, spool, cmd.args); err != nil {
+				if err := handleList(conn, spool, cmd.args); err != nil {
 					log.Printf("error sending list to client: %v\n", err)
 				}
 			case "GROUP":
@@ -276,8 +276,8 @@ func processLoop(ctx context.Context, conn *textproto.Conn, spool *spool.Spool, 
 					}
 					continue
 				}
-				setCurGroup(locals, group)
-				if err = printGroup(conn, spool, group); err != nil {
+
+				if err = handleGroup(conn, spool, group, locals); err != nil {
 					log.Printf("error sending group to client: %v\n", err)
 				}
 			case "HEAD":
@@ -354,13 +354,14 @@ func processLoop(ctx context.Context, conn *textproto.Conn, spool *spool.Spool, 
 					}
 				}
 
-				err = handleListGroups(conn, spool, group, aRange)
+				firstANum, err := handleListGroup(conn, spool, group, aRange)
 				if err != nil {
 					log.Println("error sending LISTGROUP response:", err)
 				} else {
 					// set the current group to this group if a group was specified and articles are returned
 					if explicitGroup {
 						setCurGroup(locals, group)
+						setCurArticleNum(locals, firstANum)
 					}
 				}
 			case "STAT":
@@ -456,54 +457,14 @@ func getGroupData(spool *spool.Spool, groups []string) ([]groupData, error) {
 	return datum, nil
 }
 
-func printList(conn *textproto.Conn, spool *spool.Spool, args []string) error {
-	active := false
-	if len(args) == 0 {
-		active = true
-	} else {
-		if args[0] == "ACTIVE" {
-			active = true
-		}
-	}
-
-	// TODO: We need to handle LIST properly
-	if !active {
-		return printUnknown(conn)
-	}
-
-	groups, err := spool.Newsgroups()
-	datum, err := getGroupData(spool, groups)
-	if err != nil {
-		return conn.PrintfLine("403 error reading from spool")
-	}
-
-	w := conn.DotWriter()
-	_, err = w.Write([]byte("215 list of newsgroups follows\n"))
-	if err != nil {
-		return fmt.Errorf("error returning active list status line: %w", err)
-	}
-
-	for _, data := range datum {
-		_, err = w.Write([]byte(data.String(false)))
-		if err != nil {
-			return fmt.Errorf("error writing group response line to socket: %w", err)
-		}
-		_, err = w.Write([]byte("\n"))
-		if err != nil {
-			return fmt.Errorf("error writing group response line to socket: %w", err)
-		}
-	}
-
-	return w.Close()
-}
-
-func printGroup(conn *textproto.Conn, spool *spool.Spool, group string) error {
+func handleGroup(conn *textproto.Conn, spool *spool.Spool, group string, locals *sync.Map) error {
 	count, err := spool.GroupArticleCount(group)
 	if err != nil {
 		log.Println("error getting group", group, "article count:", err)
 		return conn.PrintfLine("403 error reading from spool")
 	}
 	var grpData groupData
+	var articlesFound bool
 	if count == 0 {
 		grpData = groupData{
 			name:   group,
@@ -512,12 +473,18 @@ func printGroup(conn *textproto.Conn, spool *spool.Spool, group string) error {
 			status: POSTING_NONPERMITTED,
 		}
 	} else {
+		articlesFound = true
 		grpData = groupData{
 			name:   group,
 			high:   count,
 			low:    1,
 			status: POSTING_NONPERMITTED,
 		}
+	}
+
+	setCurGroup(locals, group)
+	if articlesFound {
+		setCurArticleNum(locals, 1)
 	}
 
 	return conn.PrintfLine("211 %s", grpData.String(true))
@@ -720,18 +687,18 @@ func parseArticleRange(rawRange string) (articleRange, error) {
 	}
 }
 
-func handleListGroups(conn *textproto.Conn, sp *spool.Spool, group string, rng articleRange) error {
+func handleListGroup(conn *textproto.Conn, sp *spool.Spool, group string, rng articleRange) (uint, error) {
 	if len(group) < 1 {
-		return conn.PrintfLine("412 No newsgroup selected")
+		return 0, conn.PrintfLine("412 No newsgroup selected")
 	}
 
 	aNums, err := sp.GetArticleNumsFromGroup(group)
 	if err != nil {
-		return conn.PrintfLine("500 query to spool failed")
+		return 0, conn.PrintfLine("500 query to spool failed")
 	}
 
 	if len(aNums) == 0 {
-		return conn.PrintfLine("411 group not found")
+		return 0, conn.PrintfLine("411 group not found")
 	}
 
 	var newNums []uint
@@ -772,23 +739,23 @@ func handleListGroups(conn *textproto.Conn, sp *spool.Spool, group string, rng a
 	_, err = w.Write([]byte(fmt.Sprintf("211 %d %d %d list follows\n", span, min, max)))
 	if err != nil {
 		w.Close()
-		return fmt.Errorf("error returning newgroups status line: %w", err)
+		return 0, fmt.Errorf("error returning listgroups status line: %w", err)
 	}
 
 	for _, num := range newNums {
 		_, err = w.Write([]byte(fmt.Sprintf("%d", num)))
 		if err != nil {
 			w.Close()
-			return fmt.Errorf("error writing article number line to socket: %w", err)
+			return 0, fmt.Errorf("error writing article number line to socket: %w", err)
 		}
 		_, err = w.Write([]byte("\n"))
 		if err != nil {
 			w.Close()
-			return fmt.Errorf("error writing article number line to socket: %w", err)
+			return 0, fmt.Errorf("error writing article number line to socket: %w", err)
 		}
 	}
 
-	return w.Close()
+	return 1, w.Close()
 }
 
 func handleStat(conn *textproto.Conn, sp *spool.Spool, group string, aNum uint, args []string) error {
