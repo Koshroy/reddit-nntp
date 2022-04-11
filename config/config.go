@@ -15,13 +15,19 @@ type Credentials struct {
 	Password string
 }
 
+type SubredditPreference struct {
+	Name string
+	PageFetchLimit uint
+	ConcurrencyLimit uint
+	IgnoreTick bool
+}
+
 type Config struct {
 	ConcurrencyLimit uint
 	IgnoreTick       bool
 	Listener         string
-	Subreddits       []string
-	PageFetchLimit   uint
 	BotCredentials   Credentials
+	Subreddits       []SubredditPreference
 }
 
 func ParseFile(path string) (*Config, error) {

@@ -60,13 +60,10 @@ func main() {
 		return
 	}
 
-	if *subs || (*updateFlag > 0) {
-		if *subs && (*updateFlag > 0) {
+	willUpdate := *updateFlag > 0
+	if *subs || willUpdate {
+		if *subs && willUpdate {
 			log.Fatalln("Cannot init and update at the same time")
-		}
-
-		if cfg.PageFetchLimit == 0 {
-			log.Fatalln("PageFetchLimit not set in config, exiting.")
 		}
 
 		var fetchStart time.Time
@@ -83,12 +80,19 @@ func main() {
 			fetchStart = now.Add(time.Duration(-1**updateFlag) * time.Hour)
 		}
 		for _, sub := range cfg.Subreddits {
-			log.Println("Fetching sub", sub)
-			err = spool.FetchSubreddit(sub, fetchStart, cfg.PageFetchLimit, cfg.IgnoreTick)
+			log.Printf("sub: %v+", sub)
+			if sub.PageFetchLimit == 0 {
+				log.Println("No page fetch limit set for sub", sub.Name, "aborting.")
+				continue
+			}
+
+			log.Println("Fetching sub", sub.Name)
+			err = spool.FetchSubreddit(sub.Name, fetchStart, sub.PageFetchLimit, sub.IgnoreTick)
 			if err != nil {
 				log.Fatalln("Could not fetch sub:", err)
 			}
-			err = spool.AddGroupMetadata(sub, time.Now(), 30)
+			log.Println("Updating newsgroup metadata for", sub.Name)
+			err = spool.AddGroupMetadata(sub.Name, time.Now(), 30)
 			if err != nil {
 				log.Fatalln("Could not add group metadata for sub", sub, ":", err)
 			}
