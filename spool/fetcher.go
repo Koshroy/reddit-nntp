@@ -27,12 +27,17 @@ func (s *Spool) FetchSubreddit(subreddit string, startDateTime time.Time, pageFe
 				Limit: 100, // max limit
 			},
 		)
-		allPosts = append(allPosts, posts...)
+		if len(posts) > 0 {
+			allPosts = append(allPosts, posts...)
+		}
 		if !results {
 			results = len(allPosts) > 0
 		}
 		if err != nil {
 			if !results {
+				if resp != nil {
+					log.Println("got rate limit:", resp.Rate.Remaining)
+				}
 				return fmt.Errorf("could not fetch any posts from %s: %w", subreddit, err)
 			}
 			break
