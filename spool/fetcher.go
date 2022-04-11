@@ -10,9 +10,23 @@ import (
 	"github.com/vartanbeno/go-reddit/v2/reddit"
 )
 
-func (s *Spool) FetchSubreddit(subreddit string, startDateTime time.Time, pageFetchLimit uint, ignoreTick bool) error {
+type FetchSubArgs struct {
+	Subreddit      string
+	StartDateTime  time.Time
+	PageFetchLimit uint
+	ConcLimit      uint
+	IgnoreTick     bool
+}
+
+func (s *Spool) FetchSubreddit(args FetchSubArgs) error {
 	allPosts := make([]*reddit.Post, 0)
 	results := false
+
+	subreddit := args.Subreddit
+	startDateTime := args.StartDateTime
+	pageFetchLimit := args.PageFetchLimit
+	concLimit := args.ConcLimit
+	ignoreTick := args.IgnoreTick
 
 	ticker := time.Tick(1 * time.Second)
 	for i := uint(0); i < pageFetchLimit; i++ {
@@ -63,7 +77,7 @@ func (s *Spool) FetchSubreddit(subreddit string, startDateTime time.Time, pageFe
 	var spoolWg sync.WaitGroup
 	pChan := make(chan *reddit.PostAndComments)
 	spoolPCChan := make(chan *reddit.PostAndComments)
-	limiter := make(chan bool, s.concLimit)
+	limiter := make(chan bool, concLimit)
 	go s.addPostAndComments(spoolPCChan, &spoolWg)
 	wg.Add(len(allPosts))
 	for _, p := range allPosts {

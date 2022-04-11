@@ -41,7 +41,7 @@ func main() {
 		log.Fatalln("could not parse config file:", err)
 	}
 
-	spool, err := spool.New(*dbPath, cfg.ConcurrencyLimit, &spool.Credentials{
+	sp, err := spool.New(*dbPath, cfg.ConcurrencyLimit, &spool.Credentials{
 		ID:       cfg.BotCredentials.ID,
 		Secret:   cfg.BotCredentials.Secret,
 		Username: cfg.BotCredentials.Username,
@@ -50,9 +50,9 @@ func main() {
 	if err != nil {
 		log.Fatalln("Could not open spool:", err)
 	}
-	defer spool.Close()
+	defer sp.Close()
 	if *initFlag {
-		err = spool.Init(time.Now().Add(-24*7*time.Hour), *prefix)
+		err = sp.Init(time.Now().Add(-24*7*time.Hour), *prefix)
 		if err != nil {
 			log.Fatalln("Could not initialize spool:", err)
 		}
@@ -69,7 +69,7 @@ func main() {
 		var fetchStart time.Time
 		if *subs {
 			log.Println("Populating spool with subs")
-			start, err := spool.StartDate()
+			start, err := sp.StartDate()
 			if err != nil {
 				log.Fatalln("Could not fetch start date:", err)
 			}
@@ -80,29 +80,35 @@ func main() {
 			fetchStart = now.Add(time.Duration(-1**updateFlag) * time.Hour)
 		}
 		for _, sub := range cfg.Subreddits {
-			log.Printf("sub: %v+", sub)
 			if sub.PageFetchLimit == 0 {
 				log.Println("No page fetch limit set for sub", sub.Name, "aborting.")
 				continue
 			}
 
 			log.Println("Fetching sub", sub.Name)
-			err = spool.FetchSubreddit(sub.Name, fetchStart, sub.PageFetchLimit, sub.IgnoreTick)
+			fetchArgs := spool.FetchSubArgs{
+				Subreddit:      sub.Name,
+				StartDateTime:  fetchStart,
+				PageFetchLimit: sub.PageFetchLimit,
+				ConcLimit:      sub.ConcurrencyLimit,
+				IgnoreTick:     sub.IgnoreTick,
+			}
+			err = sp.FetchSubreddit(fetchArgs)
 			if err != nil {
 				log.Fatalln("Could not fetch sub:", err)
 			}
 			log.Println("Updating newsgroup metadata for", sub.Name)
-			err = spool.AddGroupMetadata(sub.Name, time.Now(), 30)
+			err = sp.AddGroupMetadata(sub.Name, time.Now(), 30)
 			if err != nil {
-				log.Fatalln("Could not add group metadata for sub", sub, ":", err)
+				log.Fatalln("Could not add group metadata for sub", sub.Name, ":", err)
 			}
-			log.Println("Finished populating subreddit", sub)
+			log.Println("Finished populating subreddit", sub.Name)
 		}
 		log.Println("Finished populating spool")
 		return
 	}
 
-	count, err := spool.ArticleCount()
+	count, err := sp.ArticleCount()
 	if err != nil {
 		log.Fatalln("error: spool is probably empty:", err)
 	} else if count == 0 {
@@ -117,7 +123,7 @@ func main() {
 
 	log.Println("Listening on", cfg.Listener)
 
-	acceptorLoop(readerListener, spool)
+	acceptorLoop(readerListener, sp)
 }
 
 func acceptorLoop(l net.Listener, spool *spool.Spool) {

@@ -16,10 +16,10 @@ type Credentials struct {
 }
 
 type SubredditPreference struct {
-	Name string
-	PageFetchLimit uint
+	Name             string
+	PageFetchLimit   uint
 	ConcurrencyLimit uint
-	IgnoreTick bool
+	IgnoreTick       bool
 }
 
 type Config struct {
