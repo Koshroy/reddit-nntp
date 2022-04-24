@@ -1,0 +1,39 @@
+# Which IP and port should reddit-nntp listen on?
+listener = "127.0.0.1:1119"
+
+# What prefix should be used for the Reddit hierarchy? If this
+# is unspecified, it defaults to "reddit".
+prefix = "reddit"
+
+# Reddit-NNTP supports both using an API secret or anonymous usage.
+# If you wish to use credentials, use the following stanza:
+[BotCredentials]
+ID = "<Bot ID>"
+Secret = "<Bot Secret>"
+Username = "<Bot Username>"
+Password = "<Bot Password>"
+
+# Subreddit configs are added per-subreddit you wish to collect in
+# spool.
+[[Subreddits]]
+# Name of the subreddit to fetch
+name = "Usenet"
+
+# For rate-limiting purposes, downloads can be performed on a 1s tick.
+# If you don't care about this, set ignoreTick to true
+ignoreTick = true
+
+# How many concurrent fetches from the bot API should we make?
+concurrencyLimit = 4
+
+# How many total pages should we search before giving up? Different
+# subs should be set to different limits to avoid rate limits. Chatty
+# subs need a lower limit while subs with little content can have a
+# high limit
+pageFetchLimit = 20
+
+[[Subreddits]]
+name = "networking"
+ignoreTick = false
+concurrencyLimit = 4
+pageFetchLimit = 5

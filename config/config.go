@@ -26,6 +26,7 @@ type Config struct {
 	ConcurrencyLimit uint
 	IgnoreTick       bool
 	Listener         string
+	Prefix           string
 	BotCredentials   Credentials
 	Subreddits       []SubredditPreference
 }
@@ -50,4 +51,12 @@ func ParseFile(path string) (*Config, error) {
 	}
 
 	return &config, err
+}
+
+func (cfg *Config) GetPrefix() string {
+	prefix := cfg.Prefix
+	if prefix == "" {
+		return "reddit"
+	}
+	return prefix
 }

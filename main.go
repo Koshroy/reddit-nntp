@@ -26,7 +26,6 @@ func main() {
 
 	initFlag := flag.Bool("init", false, "initialize the database")
 	updateFlag := flag.Int("update", 0, "update spool with contents of last n hours")
-	prefix := flag.String("prefix", "reddit", "prefix used on spool initialization")
 	dbPath := flag.String("db", defaultSpool, "path to sqlite database")
 	configPath := flag.String("conf", defaultConfig, "path to config file")
 	subs := flag.Bool("subs", false, "get subreddits")
@@ -52,7 +51,7 @@ func main() {
 	}
 	defer sp.Close()
 	if *initFlag {
-		err = sp.Init(time.Now().Add(-24*7*time.Hour), *prefix)
+		err = sp.Init(time.Now().Add(-24*7*time.Hour), cfg.GetPrefix())
 		if err != nil {
 			log.Fatalln("Could not initialize spool:", err)
 		}
