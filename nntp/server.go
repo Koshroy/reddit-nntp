@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Koshroy/reddit-nntp/data"
 	"github.com/Koshroy/reddit-nntp/spool"
 )
 
@@ -502,7 +503,7 @@ func printHead(conn *textproto.Conn, sp *spool.Spool, group string, args []strin
 		return conn.PrintfLine("500 could not parse line properly")
 	}
 
-	var header *spool.Header
+	var header *data.Header
 	var err error
 	var articleNum int
 	if isMessageID(arg) {
@@ -550,7 +551,7 @@ func printArticle(conn *textproto.Conn, sp *spool.Spool, group string, args []st
 		return conn.PrintfLine("500 could not parse line properly")
 	}
 
-	var article *spool.Article
+	var article *data.Article
 	var err error
 	var articleNum int
 	if isMessageID(arg) {
