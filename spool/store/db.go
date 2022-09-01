@@ -87,6 +87,7 @@ func (db *DB) CreateNewSpool(startDate time.Time, prefix string) error {
 
 	sqlStmtSpool := `
         CREATE TABLE spool(
+			   article_num INTEGER PRIMARY KEY AUTOINCREMENT,
                posted_at INTEGER NOT NULL,
                newsgroup TEXT NOT NULL,
                subject TEXT,
@@ -169,22 +170,22 @@ func (db *DB) GetStartDate() (*time.Time, error) {
 	}
 	defer rows.Close()
 
-	for rows.Next() {
-		var rawStartDate string
-		err = rows.Scan(&rawStartDate)
-		if err != nil {
-			return nil, fmt.Errorf("could not unmarshal db row: %w", err)
-		}
-
-		t, err := time.Parse(time.RFC3339, rawStartDate)
-		if err != nil {
-			return nil, fmt.Errorf("could not parse date %s from db: %w", rawStartDate, err)
-		}
-
-		return &t, nil
+	if !rows.Next() {
+		return nil, errors.New("could not find start time in spool db")
 	}
 
-	return nil, errors.New("could not find start time in spool db")
+	var rawStartDate string
+	err = rows.Scan(&rawStartDate)
+	if err != nil {
+		return nil, fmt.Errorf("could not unmarshal db row: %w", err)
+	}
+
+	t, err := time.Parse(time.RFC3339, rawStartDate)
+	if err != nil {
+		return nil, fmt.Errorf("could not parse date %s from db: %w", rawStartDate, err)
+	}
+
+	return &t, nil
 }
 
 func (db *DB) GetPrefix() (string, error) {
@@ -200,17 +201,16 @@ func (db *DB) GetPrefix() (string, error) {
 	}
 	defer rows.Close()
 
-	for rows.Next() {
-		var prefix string
-		err = rows.Scan(&prefix)
-		if err != nil {
-			return "", fmt.Errorf("could not unmarshal db row: %w", err)
-		}
-
-		return prefix, nil
+	if !rows.Next() {
+		return "", errors.New("could not find start time in spool db")
+	}
+	var prefix string
+	err = rows.Scan(&prefix)
+	if err != nil {
+		return "", fmt.Errorf("could not unmarshal db row: %w", err)
 	}
 
-	return "", errors.New("could not find start time in spool db")
+	return prefix, nil
 }
 
 func (db *DB) FetchNewsgroups() ([]string, error) {
@@ -250,16 +250,16 @@ func (db *DB) ArticleCount() (uint, error) {
 	}
 	defer rows.Close()
 
-	for rows.Next() {
-		var count uint
-		err = rows.Scan(&count)
-		if err != nil {
-			return count, fmt.Errorf("could not unmarshal db row: %w", err)
-		}
-		return count, nil
+	if !rows.Next() {
+		return 0, nil
 	}
 
-	return 0, nil
+	var count uint
+	err = rows.Scan(&count)
+	if err != nil {
+		return count, fmt.Errorf("could not unmarshal db row: %w", err)
+	}
+	return count, nil
 
 }
 
@@ -276,12 +276,11 @@ func (db *DB) DoesMessageIDExist(msgID string) (bool, error) {
 	defer rows.Close()
 
 	var count uint
-	for rows.Next() {
+	if rows.Next() {
 		err = rows.Scan(&count)
 		if err != nil {
 			return false, fmt.Errorf("could not unmarshal db row: %w", err)
 		}
-		break
 	}
 
 	return count > 0, nil
@@ -299,16 +298,17 @@ func (db *DB) GroupArticleCount(group string) (int, error) {
 	}
 	defer rows.Close()
 
-	for rows.Next() {
-		var count int
-		err = rows.Scan(&count)
-		if err != nil {
-			return count, fmt.Errorf("could not unmarshal db row: %w", err)
-		}
-		return count, nil
+	if !rows.Next() {
+		return 0, nil
 	}
 
-	return 0, nil
+	var count int
+	err = rows.Scan(&count)
+	if err != nil {
+		return count, fmt.Errorf("could not unmarshal db row: %w", err)
+	}
+
+	return count, nil
 }
 
 func (db *DB) GetRowIDs(group string) ([]RowID, error) {
@@ -357,30 +357,30 @@ func (db *DB) GetHeaderByRowID(rowID RowID) (*Header, error) {
 	}
 	defer rows.Close()
 
-	for rows.Next() {
-		var postedAt string
-		var newsgroup string
-		var subject string
-		var author string
-		var msgID string
-		var parentID string
-
-		err = rows.Scan(&postedAt, &newsgroup, &subject, &author, &msgID, &parentID)
-		if err != nil {
-			return nil, fmt.Errorf("could not unmarshal db row: %w", err)
-		}
-
-		return &Header{
-			PostedAt:  postedAt,
-			Newsgroup: newsgroup,
-			Subject:   subject,
-			Author:    author,
-			MsgID:     msgID,
-			ParentID:  parentID,
-		}, nil
+	if !rows.Next() {
+		return nil, nil
 	}
 
-	return nil, nil
+	var postedAt string
+	var newsgroup string
+	var subject string
+	var author string
+	var msgID string
+	var parentID string
+
+	err = rows.Scan(&postedAt, &newsgroup, &subject, &author, &msgID, &parentID)
+	if err != nil {
+		return nil, fmt.Errorf("could not unmarshal db row: %w", err)
+	}
+
+	return &Header{
+		PostedAt:  postedAt,
+		Newsgroup: newsgroup,
+		Subject:   subject,
+		Author:    author,
+		MsgID:     msgID,
+		ParentID:  parentID,
+	}, nil
 }
 
 func (db *DB) GetHeaderByMsgID(msgID string) (*Header, error) {
@@ -399,30 +399,30 @@ func (db *DB) GetHeaderByMsgID(msgID string) (*Header, error) {
 	}
 	defer rows.Close()
 
-	for rows.Next() {
-		var postedAt string
-		var newsgroup string
-		var subject string
-		var author string
-		var msgID string
-		var parentID string
-
-		err = rows.Scan(&postedAt, &newsgroup, &subject, &author, &msgID, &parentID)
-		if err != nil {
-			return nil, fmt.Errorf("could not unmarshal db row: %w", err)
-		}
-
-		return &Header{
-			PostedAt:  postedAt,
-			Newsgroup: newsgroup,
-			Subject:   subject,
-			Author:    author,
-			MsgID:     msgID,
-			ParentID:  parentID,
-		}, nil
+	if !rows.Next() {
+		return nil, nil
 	}
 
-	return nil, nil
+	var postedAt string
+	var newsgroup string
+	var subject string
+	var author string
+	var rowMsgID string
+	var parentID string
+
+	err = rows.Scan(&postedAt, &newsgroup, &subject, &author, &rowMsgID, &parentID)
+	if err != nil {
+		return nil, fmt.Errorf("could not unmarshal db row: %w", err)
+	}
+
+	return &Header{
+		PostedAt:  postedAt,
+		Newsgroup: newsgroup,
+		Subject:   subject,
+		Author:    author,
+		MsgID:     rowMsgID,
+		ParentID:  parentID,
+	}, nil
 }
 
 func (db *DB) GetArticleByRowID(rowID RowID) (*Article, error) {
@@ -441,34 +441,34 @@ func (db *DB) GetArticleByRowID(rowID RowID) (*Article, error) {
 	}
 	defer rows.Close()
 
-	for rows.Next() {
-		var postedAt string
-		var newsgroup string
-		var subject string
-		var author string
-		var msgID string
-		var parentID string
-		var body []byte
-
-		err = rows.Scan(&postedAt, &newsgroup, &subject, &author, &msgID, &parentID, &body)
-		if err != nil {
-			return nil, fmt.Errorf("could not unmarshal db row: %w", err)
-		}
-
-		return &Article{
-			Header: Header{
-				PostedAt:  postedAt,
-				Newsgroup: newsgroup,
-				Subject:   subject,
-				Author:    author,
-				MsgID:     msgID,
-				ParentID:  parentID,
-			},
-			Body: body,
-		}, nil
+	if !rows.Next() {
+		return nil, nil
 	}
 
-	return nil, nil
+	var postedAt string
+	var newsgroup string
+	var subject string
+	var author string
+	var msgID string
+	var parentID string
+	var body []byte
+
+	err = rows.Scan(&postedAt, &newsgroup, &subject, &author, &msgID, &parentID, &body)
+	if err != nil {
+		return nil, fmt.Errorf("could not unmarshal db row: %w", err)
+	}
+
+	return &Article{
+		Header: Header{
+			PostedAt:  postedAt,
+			Newsgroup: newsgroup,
+			Subject:   subject,
+			Author:    author,
+			MsgID:     msgID,
+			ParentID:  parentID,
+		},
+		Body: body,
+	}, nil
 }
 
 func (db *DB) GetArticleByMsgID(msgID string) (*Article, error) {
@@ -487,34 +487,34 @@ func (db *DB) GetArticleByMsgID(msgID string) (*Article, error) {
 	}
 	defer rows.Close()
 
-	for rows.Next() {
-		var postedAt string
-		var newsgroup string
-		var subject string
-		var author string
-		var msgID string
-		var parentID string
-		var body []byte
-
-		err = rows.Scan(&postedAt, &newsgroup, &subject, &author, &msgID, &parentID, &body)
-		if err != nil {
-			return nil, fmt.Errorf("could not unmarshal db row: %w", err)
-		}
-
-		return &Article{
-			Header: Header{
-				PostedAt:  postedAt,
-				Newsgroup: newsgroup,
-				Subject:   subject,
-				Author:    author,
-				MsgID:     msgID,
-				ParentID:  parentID,
-			},
-			Body: body,
-		}, nil
+	if !rows.Next() {
+		return nil, nil
 	}
 
-	return nil, nil
+	var postedAt string
+	var newsgroup string
+	var subject string
+	var author string
+	var rowMsgID string
+	var parentID string
+	var body []byte
+
+	err = rows.Scan(&postedAt, &newsgroup, &subject, &author, &rowMsgID, &parentID, &body)
+	if err != nil {
+		return nil, fmt.Errorf("could not unmarshal db row: %w", err)
+	}
+
+	return &Article{
+		Header: Header{
+			PostedAt:  postedAt,
+			Newsgroup: newsgroup,
+			Subject:   subject,
+			Author:    author,
+			MsgID:     rowMsgID,
+			ParentID:  parentID,
+		},
+		Body: body,
+	}, nil
 }
 
 func (db *DB) FetchNewGroups(dt time.Time) ([]string, error) {
@@ -555,13 +555,14 @@ func (db *DB) DoesGroupMetadataExist(gm *GroupMetadata) (bool, error) {
 	}
 	defer rows.Close()
 
+	if !rows.Next() {
+		return false, nil
+	}
+
 	var count uint
-	for rows.Next() {
-		err = rows.Scan(&count)
-		if err != nil {
-			return false, fmt.Errorf("could not unmarshal db row: %w", err)
-		}
-		break
+	err = rows.Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("could not unmarshal db row: %w", err)
 	}
 
 	return count > 0, nil

@@ -70,7 +70,7 @@ func (s *Spool) Close() error {
 func (s *Spool) Init(startDate time.Time, prefix string) error {
 	err := s.db.CreateNewSpool(startDate, prefix)
 	if err != nil {
-		return fmt.Errorf("Error initializing spool: %w", err)
+		return fmt.Errorf("error initializing spool: %w", err)
 	}
 	return nil
 }
@@ -308,7 +308,7 @@ func (s *Spool) GetArticleNumsFromGroup(group string) ([]uint, error) {
 	}
 
 	nums := make([]uint, len(rowIDs))
-	for i, _ := range rowIDs {
+	for i := range rowIDs {
 		nums = append(nums, uint(i))
 	}
 

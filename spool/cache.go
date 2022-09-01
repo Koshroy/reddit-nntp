@@ -75,7 +75,7 @@ func (s *Spool) ArticleNumToRowIDCached(group string, articleNum uint) (store.Ro
 		return zero, fmt.Errorf("error getting row IDs: %w", err)
 	}
 
-	if allRowIDs == nil || len(allRowIDs) == 0 {
+	if len(allRowIDs) == 0 {
 		return zero, fmt.Errorf("no headers found for group %s", group)
 	}
 

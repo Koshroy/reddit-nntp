@@ -28,10 +28,12 @@ func (s *Spool) FetchSubreddit(args FetchSubArgs) error {
 	concLimit := args.ConcLimit
 	ignoreTick := args.IgnoreTick
 
-	ticker := time.Tick(1 * time.Second)
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
 	for i := uint(0); i < pageFetchLimit; i++ {
 		if !ignoreTick {
-			<-ticker
+			<-ticker.C
 		}
 
 		posts, resp, err := s.client.Subreddit.NewPosts(
@@ -84,7 +86,7 @@ func (s *Spool) FetchSubreddit(args FetchSubArgs) error {
 		go fetchComments(
 			context.Background(),
 			s.client, p, pChan, limiter,
-			ticker, ignoreTick, &wg,
+			ticker.C, ignoreTick, &wg,
 		)
 	}
 	go func() {
@@ -171,15 +173,13 @@ func (s *Spool) addPostAndComments(pcChan chan *reddit.PostAndComments, wg *sync
 
 		commentStack := make([]*reddit.Comment, len(pc.Comments))
 		copy(commentStack, pc.Comments)
-		for true {
+		for {
 			if len(commentStack) == 0 {
 				break
 			}
 			c := commentStack[0]
 			commentStack = commentStack[1:]
-			for _, c := range c.Replies.Comments {
-				commentStack = append(commentStack, c)
-			}
+			commentStack = append(commentStack, c.Replies.Comments...)
 			cA := commentToArticle(c, a.Subject, prefix)
 			err := s.db.InsertArticleRecord(&cA)
 			if err != nil {
